@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { AlertTriangle, Calculator, Check, Github, GripVertical, Link, Linkedin, Share2 } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
@@ -187,7 +187,8 @@ export function App() {
         </button>
       </section>
 
-      <section className="workspace">
+      <ErrorBoundary>
+        <section className="workspace">
         <section className="equation-panel" aria-label="Triple integral input">
           <div className="coordinate-controls">
             <div className="coordinate-control">
@@ -371,6 +372,7 @@ export function App() {
           </section>
         </aside>
       </section>
+      </ErrorBoundary>
 
       <footer className="made-by-credit">
         <div className="credit-links">
@@ -564,4 +566,34 @@ function defaultInputForCoordinateSystem(coordinateSystem: CoordinateSystem): In
       [variables[2]]: { lower: '0', upper: '1' },
     },
   };
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <section className="workspace">
+          <div className="error-boundary-message">
+            <AlertTriangle size={48} />
+            <h2>Something went wrong</h2>
+            <p>The visualizer encountered an unexpected error. Try refreshing the page or checking your equations.</p>
+            <button className="share-button" onClick={() => window.location.reload()}>
+              Refresh Page
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
 }

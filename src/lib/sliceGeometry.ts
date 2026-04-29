@@ -181,8 +181,12 @@ function evaluateBounds(parsed: ParsedIntegral, variable: Variable, scope: Scope
 }
 
 function evaluate(compiled: { evaluate: (scope?: object) => unknown }, scope: Scope): number {
-  const value = compiled.evaluate(scope);
-  return typeof value === 'number' ? value : Number(value);
+  try {
+    const value = compiled.evaluate(scope);
+    return typeof value === 'number' ? value : Number(value);
+  } catch {
+    return NaN;
+  }
 }
 
 function interpolate(range: [number, number], mix: number) {

@@ -229,12 +229,18 @@ function sampleNested(parsed: ParsedIntegral, sampleBudget: number, rng: () => n
     const transformJacobian = coordinateJacobian(parsed.input.coordinateSystem, parsed.input.variables, coordinateScope);
     const jacobian = intervalVolume * transformJacobian;
     const point = toCartesian(parsed.input.coordinateSystem, parsed.input.variables, coordinateScope);
-    points.push(point);
-    coordinatePoints.push(coordinateScope);
-    const f = evaluate(parsed.integrand!, scope);
-    const contribution = Number.isFinite(f) ? f * jacobian : 0;
-    weightedVolumes.push(jacobian);
-    weightedIntegrands.push(contribution);
+
+    if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z)) {
+      points.push(point);
+      coordinatePoints.push(coordinateScope);
+      const f = evaluate(parsed.integrand!, scope);
+      const contribution = Number.isFinite(f) ? f * jacobian : 0;
+      weightedVolumes.push(jacobian);
+      weightedIntegrands.push(contribution);
+    } else {
+      weightedVolumes.push(0);
+      weightedIntegrands.push(0);
+    }
   }
 
   if (invalidIntervals > sampleBudget * 0.05) {
@@ -273,8 +279,12 @@ function emptySample(input: IntegralInput, warnings: string[]): RegionSample {
 }
 
 function evaluate(compiled: { evaluate: (scope?: object) => unknown }, scope: Scope): number {
-  const value = compiled.evaluate(scope);
-  return typeof value === 'number' ? value : Number(value);
+  try {
+    const value = compiled.evaluate(scope);
+    return typeof value === 'number' ? value : Number(value);
+  } catch {
+    return NaN;
+  }
 }
 
 function normalizeExpression(expression: string, input: IntegralInput): string {
@@ -283,13 +293,17 @@ function normalizeExpression(expression: string, input: IntegralInput): string {
 
 function unknownSymbols(node: MathNode, variables: Variable[]): string[] {
   const symbols = new Set<string>();
-  node.traverse((child: MathNode) => {
+  node.traverse((child: MathNode, _path: string, parent: MathNode) => {
     const symbol = child as MathNode & { isSymbolNode?: boolean; name?: string };
     if (symbol.isSymbolNode && symbol.name) {
       const name = symbol.name;
       const isVariable = variables.includes(name as Variable);
-      const isKnown = ALLOWED_NON_VARIABLE_SYMBOLS.has(name) || typeof (math as unknown as Record<string, unknown>)[name] !== 'undefined';
-      if (!isVariable && !isKnown) symbols.add(name);
+      const isConstant = ALLOWED_NON_VARIABLE_SYMBOLS.has(name);
+      const isFunctionName = parent && parent.type === 'FunctionNode' && (parent as any).fn === child;
+
+      if (!isVariable && !isConstant && !isFunctionName) {
+        symbols.add(name);
+      }
     }
   });
   return [...symbols];
