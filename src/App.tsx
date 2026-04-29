@@ -26,7 +26,7 @@ export function App() {
   const [variableDrafts, setVariableDrafts] = useState<[string, string, string]>(STARTER.variables);
   const [draggedVariable, setDraggedVariable] = useState<Variable | null>(null);
   const [dropVariable, setDropVariable] = useState<Variable | null>(null);
-  const [{ sliceCount, selectedSlice }, setSliceSettings] = useState({ sliceCount: 7, selectedSlice: 4 });
+  const [{ sliceCount, selectedSlice }, setSliceSettings] = useState({ sliceCount: 7, selectedSlice: 7 });
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
   const [isShared] = useState(!!SHARED_INPUT);
   const integralRefs = useRef<Partial<Record<Variable, HTMLDivElement>>>({});
@@ -396,7 +396,6 @@ function SupportPanel() {
         <span aria-hidden="true">📚</span>
         Pay for my Textbooks
       </a>
-      <img className="support-qr" src="/qr-code.png" alt="Buy Me a Coffee QR code" />
     </div>
   );
 }
