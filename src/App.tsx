@@ -317,7 +317,7 @@ export function App() {
 
       <footer className="made-by-credit">
         <div className="credit-links">
-          <span>Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</span>
+          <span>Made by Nirav with GPT-5.5 for Ms. Augsburger&apos;s 3rd Block Multi, 25-26.</span>
           <a href="https://github.com/21J3phy/triple-integral-3d-visualizer" target="_blank" rel="noreferrer">
             <Github size={16} aria-hidden="true" />
             GitHub
