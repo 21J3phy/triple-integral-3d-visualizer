@@ -1,20 +1,23 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { AlertTriangle, Calculator, Github, GripVertical, Linkedin } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import { AlertTriangle, Calculator, Check, Github, GripVertical, Link, Linkedin, Share2 } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
 import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
 import { parseIntegral, sampleRegion } from './lib/integral';
 import { orderFromOuterToInner, orderToOuterInner } from './lib/orders';
 import { PRESETS } from './lib/presets';
+import { buildShareUrl, copyToClipboard, getSharedEquation } from './lib/sharing';
 import type { CoordinateSystem, IntegralInput, Variable } from './types';
 
-const STARTER = PRESETS[1].input;
+const SHARED_INPUT = getSharedEquation();
+const STARTER = SHARED_INPUT ?? PRESETS[1].input;
 const SAMPLE_COUNT = 8000;
 const SWAP_ANIMATION_MS = 260;
 const MIN_SLICE_COUNT = 1;
 const MAX_SLICE_COUNT = 100;
 const SLICE_COUNT_WARNING_THRESHOLD = 20;
 const BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/21J3phy';
+const COORDINATE_SYSTEMS = Object.keys(COORDINATE_LABELS) as CoordinateSystem[];
 type ElementRects = Partial<Record<Variable, DOMRect>>;
 
 export function App() {
@@ -23,6 +26,8 @@ export function App() {
   const [draggedVariable, setDraggedVariable] = useState<Variable | null>(null);
   const [dropVariable, setDropVariable] = useState<Variable | null>(null);
   const [{ sliceCount, selectedSlice }, setSliceSettings] = useState({ sliceCount: 7, selectedSlice: 4 });
+  const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
+  const [isShared] = useState(!!SHARED_INPUT);
   const integralRefs = useRef<Partial<Record<Variable, HTMLDivElement>>>({});
   const differentialRefs = useRef<Partial<Record<Variable, HTMLSpanElement>>>({});
   const previousIntegralRects = useRef<ElementRects | null>(null);
@@ -33,6 +38,7 @@ export function App() {
   const variables = input.variables;
   const outerToInner = orderToOuterInner(input.selectedOrder);
   const innerToOuter = [...outerToInner].reverse();
+  const selectedCoordinateIndex = COORDINATE_SYSTEMS.indexOf(input.coordinateSystem);
 
   useEffect(() => {
     setVariableDrafts(input.variables);
@@ -82,6 +88,15 @@ export function App() {
   const commitOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
+
+  const handleShare = useCallback(async () => {
+    const url = buildShareUrl(input);
+    const success = await copyToClipboard(url);
+    if (success) {
+      setShareState('copied');
+      setTimeout(() => setShareState('idle'), 2400);
+    }
+  }, [input]);
 
   const captureSwapRects = () => {
     previousIntegralRects.current = measureElements(integralRefs.current, variables);
@@ -140,43 +155,61 @@ export function App() {
 
   return (
     <main className="app-shell">
+      {isShared && <SharedBanner />}
       <section className="topbar">
-        <div>
-          <p className="eyebrow">Multivariable calculus</p>
-          <h1>Triple Integral Visualizer</h1>
+        <div className="topbar-brand">
+          <img src="/logo.png" alt="Triple Integral Visualizer logo" className="topbar-logo" />
+          <div>
+            <p className="eyebrow">Multivariable calculus</p>
+            <h1>Triple Integral Visualizer</h1>
+          </div>
         </div>
-        <div className="preset-row" aria-label="Example regions">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              className="preset-button"
-              type="button"
-              title={preset.description}
-              onClick={() => setInput(preset.input)}
-            >
-              {preset.name}
-            </button>
-          ))}
-        </div>
+        <button
+          id="share-equation-button"
+          className={`share-button${shareState === 'copied' ? ' copied' : ''}`}
+          type="button"
+          onClick={handleShare}
+          aria-label="Share this equation"
+        >
+          {shareState === 'copied' ? (
+            <>
+              <Check size={16} aria-hidden="true" />
+              Link Copied!
+            </>
+          ) : (
+            <>
+              <Share2 size={16} aria-hidden="true" />
+              Share
+            </>
+          )}
+        </button>
       </section>
 
       <section className="workspace">
         <section className="equation-panel" aria-label="Triple integral input">
           <div className="coordinate-controls">
-            <label className="select-control">
-              <span>Coordinates</span>
-              <select
-                aria-label="Coordinate system"
-                value={input.coordinateSystem}
-                onChange={(event) => updateCoordinateSystem(event.target.value as CoordinateSystem)}
+            <div className="coordinate-control">
+              <span id="coordinate-system-label">Coordinates</span>
+              <div
+                className="coordinate-slider"
+                role="radiogroup"
+                aria-labelledby="coordinate-system-label"
+                style={{ '--coordinate-index': selectedCoordinateIndex } as CSSProperties}
               >
-                {(Object.keys(COORDINATE_LABELS) as CoordinateSystem[]).map((coordinateSystem) => (
-                  <option key={coordinateSystem} value={coordinateSystem}>
+                {COORDINATE_SYSTEMS.map((coordinateSystem) => (
+                  <button
+                    key={coordinateSystem}
+                    className={coordinateSystem === input.coordinateSystem ? 'active' : ''}
+                    type="button"
+                    role="radio"
+                    aria-checked={coordinateSystem === input.coordinateSystem}
+                    onClick={() => updateCoordinateSystem(coordinateSystem)}
+                  >
                     {COORDINATE_LABELS[coordinateSystem]}
-                  </option>
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             <div className="variable-name-row" aria-label="Variable names">
               {variableDrafts.map((name, index) => (
                 <input
@@ -301,17 +334,38 @@ export function App() {
           />
         </section>
 
-        <aside className="answer-panel" aria-label="Estimated answer">
-          <div className="answer-heading">
-            <Calculator size={18} />
-            <h2>Estimate</h2>
-          </div>
-          <div className="answer-value">{sample.integralEstimate.toFixed(5)}</div>
-          <div className="answer-details">
-            <span>Volume {sample.estimatedVolume.toFixed(5)}</span>
-            <span>Jacobian {sample.jacobianLabel}</span>
-            <span>{COORDINATE_LABELS[input.coordinateSystem]}</span>
-          </div>
+        <aside className="right-rail">
+          <section className="answer-panel" aria-label="Estimated answer">
+            <div className="answer-heading">
+              <Calculator size={18} />
+              <h2>Estimate</h2>
+            </div>
+            <div className="answer-value">{sample.integralEstimate.toFixed(5)}</div>
+            <div className="answer-details">
+              <span>Volume {sample.estimatedVolume.toFixed(5)}</span>
+              <span>Jacobian {sample.jacobianLabel}</span>
+              <span>{COORDINATE_LABELS[input.coordinateSystem]}</span>
+            </div>
+          </section>
+
+          <section className="preset-panel" aria-label="Example regions">
+            <div className="preset-heading">
+              <h2>Examples</h2>
+            </div>
+            <div className="preset-stack">
+              {PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  className="preset-button"
+                  type="button"
+                  title={preset.description}
+                  onClick={() => setInput(preset.input)}
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          </section>
         </aside>
       </section>
 
@@ -341,6 +395,27 @@ function SupportPanel() {
         Pay for my Textbooks
       </a>
       <img className="support-qr" src="/qr-code.png" alt="Buy Me a Coffee QR code" />
+    </div>
+  );
+}
+
+function SharedBanner() {
+  const [visible, setVisible] = useState(true);
+  if (!visible) return null;
+  return (
+    <div className="shared-banner" role="status" aria-live="polite">
+      <div className="shared-banner-content">
+        <Link size={15} aria-hidden="true" />
+        <span>You&apos;re viewing a shared equation. Feel free to edit — your changes won&apos;t affect the original link.</span>
+      </div>
+      <button
+        className="shared-banner-close"
+        type="button"
+        onClick={() => setVisible(false)}
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
     </div>
   );
 }

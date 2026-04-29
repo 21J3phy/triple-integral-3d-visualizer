@@ -1,5 +1,6 @@
 import type { CoordinateSystem, Point3, Variable } from '../types';
 import type { IntegralInput } from '../types';
+import { normalizeExpressionAliases } from './expressionAliases';
 import { orderFromOuterToInner } from './orders';
 
 export const DEFAULT_VARIABLES: Record<CoordinateSystem, [Variable, Variable, Variable]> = {
@@ -135,6 +136,11 @@ function convertBounds(
   targetSystem: CoordinateSystem,
   targetVariables: [Variable, Variable, Variable],
 ): Pick<IntegralInput, 'selectedOrder' | 'bounds'> {
+  if (input.coordinateSystem === 'cartesian' && targetSystem === 'spherical') {
+    const converted = cartesianToSphericalBounds(input, targetVariables);
+    if (converted) return converted;
+  }
+
   if (input.coordinateSystem === 'spherical' && targetSystem === 'cartesian') {
     const converted = sphereToCartesianBounds(input, targetVariables);
     if (converted) return converted;
@@ -153,6 +159,82 @@ function convertBounds(
   return defaultBoundsForCoordinateSystem(targetSystem, targetVariables);
 }
 
+function cartesianToSphericalBounds(
+  input: IntegralInput,
+  targetVariables: [Variable, Variable, Variable],
+): Pick<IntegralInput, 'selectedOrder' | 'bounds'> | null {
+  return cartesianBallToSphericalBounds(input, targetVariables) ?? cartesianTetrahedronToSphericalBounds(input, targetVariables);
+}
+
+function cartesianBallToSphericalBounds(
+  input: IntegralInput,
+  targetVariables: [Variable, Variable, Variable],
+): Pick<IntegralInput, 'selectedOrder' | 'bounds'> | null {
+  const [x, y, z] = input.variables;
+  const xBounds = input.bounds[x];
+  const yBounds = input.bounds[y];
+  const zBounds = input.bounds[z];
+  const radius = xBounds.upper;
+  const normalizedRadius = normalizeExpression(radius);
+  const xyDisk = `${normalizedRadius}^2-${x}^2`;
+  const ballSlice = `${normalizedRadius}^2-${x}^2-${y}^2`;
+
+  if (
+    normalizeExpression(xBounds.lower) !== `-${normalizedRadius}` ||
+    normalizeExpression(yBounds.lower) !== `-sqrt(${xyDisk})` ||
+    normalizeExpression(yBounds.upper) !== `sqrt(${xyDisk})` ||
+    normalizeExpression(zBounds.lower) !== `-sqrt(${ballSlice})` ||
+    normalizeExpression(zBounds.upper) !== `sqrt(${ballSlice})`
+  ) {
+    return null;
+  }
+
+  const [rho, theta, phi] = targetVariables;
+  return {
+    selectedOrder: orderFromOuterToInner([theta, phi, rho]),
+    bounds: {
+      [rho]: { lower: '0', upper: radius },
+      [theta]: { lower: '0', upper: '2*pi' },
+      [phi]: { lower: '0', upper: 'pi' },
+    },
+  };
+}
+
+function cartesianTetrahedronToSphericalBounds(
+  input: IntegralInput,
+  targetVariables: [Variable, Variable, Variable],
+): Pick<IntegralInput, 'selectedOrder' | 'bounds'> | null {
+  const [x, y, z] = input.variables;
+  const xBounds = input.bounds[x];
+  const yBounds = input.bounds[y];
+  const zBounds = input.bounds[z];
+  const intercept = xBounds.upper;
+  const normalizedIntercept = normalizeExpression(intercept);
+
+  if (
+    !isZero(xBounds.lower) ||
+    !isZero(yBounds.lower) ||
+    !isZero(zBounds.lower) ||
+    hasAnyVariable(intercept, input.coordinateSystem, input.variables) ||
+    normalizeExpression(yBounds.upper) !== `${normalizedIntercept}-${x}` ||
+    normalizeExpression(zBounds.upper) !== `${normalizedIntercept}-${x}-${y}`
+  ) {
+    return null;
+  }
+
+  const [rho, theta, phi] = targetVariables;
+  const sinPhi = `sin(${phi})`;
+  const denominator = `${sinPhi} * cos(${theta}) + ${sinPhi} * sin(${theta}) + cos(${phi})`;
+  return {
+    selectedOrder: orderFromOuterToInner([theta, phi, rho]),
+    bounds: {
+      [rho]: { lower: '0', upper: `${parenthesize(intercept)} / (${denominator})` },
+      [theta]: { lower: '0', upper: 'pi/2' },
+      [phi]: { lower: '0', upper: 'pi/2' },
+    },
+  };
+}
+
 function sphereToCartesianBounds(
   input: IntegralInput,
   targetVariables: [Variable, Variable, Variable],
@@ -161,7 +243,12 @@ function sphereToCartesianBounds(
   const radiusBounds = input.bounds[radius];
   const azimuthBounds = input.bounds[azimuth];
   const polarBounds = input.bounds[polar];
-  if (!isZero(radiusBounds.lower) || !isFullTurn(azimuthBounds) || !isZeroToPi(polarBounds) || hasAnyVariable(radiusBounds.upper, input.variables)) {
+  if (
+    !isZero(radiusBounds.lower) ||
+    !isFullTurn(azimuthBounds) ||
+    !isZeroToPi(polarBounds) ||
+    hasAnyVariable(radiusBounds.upper, input.coordinateSystem, input.variables)
+  ) {
     return null;
   }
 
@@ -187,7 +274,12 @@ function sphereToCylindricalBounds(
   const radiusBounds = input.bounds[radius];
   const azimuthBounds = input.bounds[azimuth];
   const polarBounds = input.bounds[polar];
-  if (!isZero(radiusBounds.lower) || !isFullTurn(azimuthBounds) || !isZeroToPi(polarBounds) || hasAnyVariable(radiusBounds.upper, input.variables)) {
+  if (
+    !isZero(radiusBounds.lower) ||
+    !isFullTurn(azimuthBounds) ||
+    !isZeroToPi(polarBounds) ||
+    hasAnyVariable(radiusBounds.upper, input.coordinateSystem, input.variables)
+  ) {
     return null;
   }
 
@@ -211,7 +303,7 @@ function cylinderToCartesianBounds(
   const [radius, azimuth, height] = input.variables;
   const radiusBounds = input.bounds[radius];
   const azimuthBounds = input.bounds[azimuth];
-  if (!isZero(radiusBounds.lower) || !isFullTurn(azimuthBounds) || hasAnyVariable(radiusBounds.upper, input.variables)) {
+  if (!isZero(radiusBounds.lower) || !isFullTurn(azimuthBounds) || hasAnyVariable(radiusBounds.upper, input.coordinateSystem, input.variables)) {
     return null;
   }
 
@@ -278,7 +370,7 @@ function transformExpression(
   const sourceToTarget = Object.fromEntries(
     sourceVariables.map((variable) => [variable, replaceSymbols(sourceToCartesian[variable], targetToCartesian)]),
   );
-  return replaceSymbols(expression, sourceToTarget);
+  return replaceSymbols(normalizeExpressionAliases(expression, sourceSystem, sourceVariables), sourceToTarget);
 }
 
 function variablesFromCartesian(system: CoordinateSystem, variables: [Variable, Variable, Variable]): Record<Variable, string> {
@@ -332,8 +424,9 @@ function replaceSymbols(expression: string, replacements: Record<string, string>
   return expression.replace(pattern, (_match, prefix: string, name: string) => `${prefix}${parenthesize(replacements[name])}`);
 }
 
-function hasAnyVariable(expression: string, variables: Variable[]): boolean {
-  return variables.some((variable) => replaceSymbols(expression, { [variable]: '__hit__' }).includes('__hit__'));
+function hasAnyVariable(expression: string, coordinateSystem: CoordinateSystem, variables: [Variable, Variable, Variable]): boolean {
+  const normalized = normalizeExpressionAliases(expression, coordinateSystem, variables);
+  return variables.some((variable) => replaceSymbols(normalized, { [variable]: '__hit__' }).includes('__hit__'));
 }
 
 function isZero(expression: string): boolean {

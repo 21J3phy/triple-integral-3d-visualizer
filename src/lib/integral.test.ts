@@ -80,6 +80,30 @@ describe('parseIntegral', () => {
     });
     expect(parsed.validationErrors).toEqual([]);
   });
+
+  it('accepts typed spherical aliases for the default Greek variables', () => {
+    const parsed = parseIntegral({
+      ...unitSphere,
+      integrand: 'rho^2 * sin(phi)',
+      bounds: {
+        ...unitSphere.bounds,
+        ρ: { lower: '0', upper: '1 + 0 * theta' },
+        θ: { lower: '0', upper: '2π' },
+        φ: { lower: '0', upper: 'pi' },
+      },
+    });
+
+    expect(parsed.validationErrors).toEqual([]);
+  });
+
+  it('accepts spherical coordinate names inside Cartesian integrands', () => {
+    const parsed = parseIntegral({
+      ...cube,
+      integrand: 'rho + theta + phi + π',
+    });
+
+    expect(parsed.validationErrors).toEqual([]);
+  });
 });
 
 describe('sampleRegion', () => {
@@ -242,6 +266,27 @@ describe('buildCoordinateSliceGeometries', () => {
 });
 
 describe('convertIntegralToCoordinateSystem', () => {
+  it('updates a Cartesian tetrahedron integrand and bounds when switching to spherical', () => {
+    const converted = convertIntegralToCoordinateSystem(
+      {
+        ...tetrahedron,
+        integrand: 'x + y + z',
+      },
+      'spherical',
+    );
+
+    expect(converted.coordinateSystem).toBe('spherical');
+    expect(converted.variables).toEqual(['ρ', 'θ', 'φ']);
+    expect(converted.selectedOrder).toBe('dρ dφ dθ');
+    expect(converted.integrand).toContain('ρ');
+    expect(converted.integrand).toContain('sin(φ)');
+    expect(converted.integrand).not.toContain('x');
+    expect(converted.bounds.θ).toEqual({ lower: '0', upper: 'pi/2' });
+    expect(converted.bounds.φ).toEqual({ lower: '0', upper: 'pi/2' });
+    expect(converted.bounds.ρ.upper).toContain('sin(φ) * cos(θ)');
+    expect(parseIntegral(converted).validationErrors).toEqual([]);
+  });
+
   it('converts a full spherical ball to Cartesian bounds and variables', () => {
     const sphere: IntegralInput = {
       integrand: 'ρ^2 + sin(φ)',
@@ -264,6 +309,21 @@ describe('convertIntegralToCoordinateSystem', () => {
     expect(converted.bounds.x).toEqual({ lower: '-2', upper: '2' });
     expect(converted.bounds.y.upper).toBe('sqrt(2^2 - x^2)');
     expect(converted.bounds.z.upper).toBe('sqrt(2^2 - x^2 - y^2)');
+    expect(parseIntegral(converted).validationErrors).toEqual([]);
+  });
+
+  it('converts spherical integrands written with typed aliases', () => {
+    const converted = convertIntegralToCoordinateSystem(
+      {
+        ...unitSphere,
+        integrand: 'rho^2 + sin(phi) + cos(theta)',
+      },
+      'cartesian',
+    );
+
+    expect(converted.integrand).toContain('sqrt');
+    expect(converted.integrand).toContain('acos');
+    expect(converted.integrand).toContain('atan2');
     expect(parseIntegral(converted).validationErrors).toEqual([]);
   });
 });

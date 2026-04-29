@@ -11,6 +11,7 @@ import type {
   IntegralInput,
 } from '../types';
 import { areValidVariables, coordinateJacobian, fromCartesian, jacobianLabel, toCartesian } from './coordinates';
+import { normalizeExpressionAliases } from './expressionAliases';
 import { allOrdersForVariables, orderToInnerOuter, orderToOuterInner } from './orders';
 
 const math = create(all, {}) as MathJsInstance;
@@ -30,7 +31,7 @@ export function parseIntegral(input: IntegralInput): ParsedIntegral {
   }
 
   try {
-    const node = math.parse(input.integrand) as MathNode;
+    const node = math.parse(normalizeExpression(input.integrand, input)) as MathNode;
     const unknown = unknownSymbols(node, input.variables);
     if (unknown.length) {
       validationErrors.push(`Integrand has unknown symbol(s): ${unknown.join(', ')}.`);
@@ -45,7 +46,7 @@ export function parseIntegral(input: IntegralInput): ParsedIntegral {
     const compiled: Partial<{ lower: EvalFunction; upper: EvalFunction }> = {};
     for (const side of ['lower', 'upper'] as const) {
       try {
-        const node = math.parse(bound[side]) as MathNode;
+        const node = math.parse(normalizeExpression(bound[side], input)) as MathNode;
         const unknown = unknownSymbols(node, input.variables);
         if (unknown.length) {
           validationErrors.push(`${variable} ${side} bound has unknown symbol(s): ${unknown.join(', ')}.`);
@@ -274,6 +275,10 @@ function emptySample(input: IntegralInput, warnings: string[]): RegionSample {
 function evaluate(compiled: { evaluate: (scope?: object) => unknown }, scope: Scope): number {
   const value = compiled.evaluate(scope);
   return typeof value === 'number' ? value : Number(value);
+}
+
+function normalizeExpression(expression: string, input: IntegralInput): string {
+  return normalizeExpressionAliases(expression, input.coordinateSystem, input.variables);
 }
 
 function unknownSymbols(node: MathNode, variables: Variable[]): string[] {
