@@ -7,6 +7,7 @@ import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS
 import { parseIntegral, sampleRegion } from './lib/integral';
 import { orderFromOuterToInner, orderToOuterInner } from './lib/orders';
 import { PRESETS } from './lib/presets';
+import { PresetPreview } from './components/PresetPreview';
 import { buildShareUrl, copyToClipboard, getSharedEquation } from './lib/sharing';
 import type { CoordinateSystem, IntegralInput, Variable } from './types';
 
@@ -353,16 +354,17 @@ export function App() {
             <div className="preset-heading">
               <h2>Examples</h2>
             </div>
-            <div className="preset-stack">
+            <div className="preset-grid">
               {PRESETS.map((preset) => (
                 <button
                   key={preset.id}
-                  className="preset-button"
+                  className="preset-card"
                   type="button"
                   title={preset.description}
                   onClick={() => setInput(preset.input)}
                 >
-                  {preset.name}
+                  <PresetPreview input={preset.input} />
+                  <span className="preset-card-label">{preset.name}</span>
                 </button>
               ))}
             </div>

@@ -656,35 +656,38 @@ h1 {
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .preset-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
+  gap: 10px;
   border: 1px solid #ccd6e1;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.84);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
   color: #273444;
-  padding: 10px 8px 10px;
+  padding: 10px;
   font-weight: 750;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
   transition:
-    border-color 180ms ease,
-    background 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
+  overflow: hidden;
 }
 
 .preset-card:hover,
 .preset-card:focus-visible {
-  border-color: #6f8195;
+  border-color: #5c8fc0;
   background: #ffffff;
-  box-shadow: 0 8px 22px rgba(31, 48, 71, 0.1);
-  transform: translateY(-2px);
+  box-shadow: 
+    0 4px 12px rgba(31, 48, 71, 0.06),
+    0 12px 32px rgba(31, 48, 71, 0.12);
+  transform: translateY(-3px);
 }
 
 .preset-card:focus-visible {
@@ -693,16 +696,26 @@ h1 {
 }
 
 .preset-card:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(31, 48, 71, 0.08);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(31, 48, 71, 0.08);
 }
 
 .preset-preview {
+  position: relative;
   width: 100%;
-  aspect-ratio: 1;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #f0f4f8, #e6ecf2);
+  aspect-ratio: 1.1;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #f0f4f8, #e1e9f1);
   overflow: hidden;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.03);
+}
+
+.preset-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.4), transparent 70%);
 }
 
 .preset-preview canvas {
@@ -713,14 +726,11 @@ h1 {
 
 .preset-card-label {
   display: block;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-weight: 800;
-  color: #253348;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+  color: #1e293b;
+  line-height: 1.25;
+  padding: 2px 4px;
 }
 
 
