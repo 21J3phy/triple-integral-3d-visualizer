@@ -381,24 +381,17 @@ export function App() {
             <Linkedin size={16} aria-hidden="true" />
             LinkedIn
           </a>
+          <a href={BUY_ME_COFFEE_URL} target="_blank" rel="noreferrer">
+            <span aria-hidden="true" style={{ fontSize: '16px' }}>📚</span>
+            Pay for my Textbooks
+          </a>
         </div>
-        <SupportPanel />
       </footer>
       <Analytics />
     </main>
   );
 }
 
-function SupportPanel() {
-  return (
-    <div className="footer-support" aria-label="Support this project">
-      <a className="bmc-footer-button" href={BUY_ME_COFFEE_URL} target="_blank" rel="noreferrer">
-        <span aria-hidden="true">📚</span>
-        Pay for my Textbooks
-      </a>
-    </div>
-  );
-}
 
 function SharedBanner() {
   const [visible, setVisible] = useState(true);
