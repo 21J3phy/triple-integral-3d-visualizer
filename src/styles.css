@@ -104,12 +104,20 @@ h1 {
   flex-wrap: wrap;
   gap: 8px 12px;
   max-width: 1460px;
-  margin: 14px auto 0;
+  margin: 22px auto 0;
   color: #6a7788;
   font-size: 0.82rem;
   font-weight: 750;
   line-height: 1.45;
   text-align: center;
+}
+
+.credit-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .made-by-credit a {
@@ -135,14 +143,13 @@ h1 {
 }
 
 .equation-panel {
-  position: sticky;
-  top: 12px;
+  position: relative;
   z-index: 5;
   grid-column: 1 / -1;
   display: grid;
   align-content: start;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 15px;
 }
 
 .coordinate-controls {
@@ -151,7 +158,7 @@ h1 {
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid #e4ebf2;
-  padding-bottom: 14px;
+  padding-bottom: 12px;
 }
 
 .select-control {
@@ -194,30 +201,34 @@ h1 {
 
 .integral-equation {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   min-width: 0;
   max-width: 100%;
+  padding: 4px 2px 10px;
   overflow-x: auto;
-  padding: 8px 2px 14px;
   overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
 }
 
 .integral-stack {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  flex: 0 0 auto;
-  min-height: 192px;
+  flex: 0 1 auto;
+  min-height: 170px;
 }
 
 .integral-block {
   position: relative;
   display: grid;
-  grid-template-rows: 40px 84px 40px 24px;
+  grid-template-rows: 36px 74px 36px 22px;
   justify-items: center;
   gap: 2px;
-  width: 116px;
+  flex: 0 0 108px;
+  width: 108px;
   padding: 2px 4px 0;
   border-radius: 8px;
   outline: 2px solid transparent;
@@ -251,11 +262,11 @@ h1 {
 
 .bound-input {
   width: 100%;
-  height: 38px;
+  height: 36px;
   padding: 7px 8px;
   text-align: center;
   font-family: "STIX Two Math", Cambria Math, Georgia, serif;
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .integral-mark {
@@ -263,7 +274,7 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 0;
-  height: 84px;
+  height: 74px;
   color: #1d2a3a;
   cursor: grab;
   touch-action: none;
@@ -281,7 +292,7 @@ h1 {
 .integral-symbol {
   display: inline-block;
   font-family: "STIX Two Math", Cambria Math, Georgia, serif;
-  font-size: 5.2rem;
+  font-size: 4.65rem;
   line-height: 0.85;
 }
 
@@ -289,17 +300,18 @@ h1 {
 .differentials span {
   color: #2c3a4d;
   font-family: "STIX Two Math", Cambria Math, Georgia, serif;
-  font-size: 1.1rem;
+  font-size: 1.02rem;
   font-weight: 700;
 }
 
 .integrand-input {
-  flex: 0 0 min(260px, 36vw);
+  flex: 1 1 180px;
   min-width: 160px;
-  height: 52px;
-  padding: 11px 13px;
+  max-width: 100%;
+  height: 48px;
+  padding: 10px 13px;
   font-family: "STIX Two Math", Cambria Math, Georgia, serif;
-  font-size: 1.28rem;
+  font-size: 1.18rem;
 }
 
 .bound-input:focus,
@@ -329,7 +341,7 @@ h1 {
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 12px;
   border-top: 1px solid #e4ebf2;
-  padding-top: 14px;
+  padding-top: 12px;
 }
 
 .slider-control {
@@ -455,6 +467,53 @@ h1 {
   font-weight: 700;
 }
 
+.footer-support {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.made-by-credit .bmc-footer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid #000000;
+  border-radius: 7px;
+  background: #5f7fff;
+  color: #ffffff;
+  padding: 5px 8px;
+  font-family: Lato, Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  box-shadow: 0 2px 0 #000000;
+}
+
+.made-by-credit .bmc-footer-button:visited {
+  color: #ffffff;
+}
+
+.made-by-credit .bmc-footer-button:hover {
+  color: #ffffff;
+  text-decoration: none;
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 #000000;
+}
+
+.support-qr {
+  display: block;
+  width: 44px;
+  aspect-ratio: 1;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #ffffff;
+  object-fit: contain;
+}
+
 @media (max-width: 1100px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -502,7 +561,6 @@ h1 {
 
   .equation-panel {
     padding: 14px;
-    top: 8px;
   }
 
   .coordinate-controls {
@@ -556,4 +614,5 @@ h1 {
   .viewer-wrap {
     min-height: 430px;
   }
+
 }

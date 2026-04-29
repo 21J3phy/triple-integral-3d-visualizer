@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { AlertTriangle, Calculator, Github, GripVertical } from 'lucide-react';
+import { AlertTriangle, Calculator, Github, GripVertical, Linkedin } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
 import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
@@ -14,6 +14,7 @@ const SWAP_ANIMATION_MS = 260;
 const MIN_SLICE_COUNT = 1;
 const MAX_SLICE_COUNT = 100;
 const SLICE_COUNT_WARNING_THRESHOLD = 20;
+const BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/21J3phy';
 type ElementRects = Partial<Record<Variable, DOMRect>>;
 
 export function App() {
@@ -315,13 +316,32 @@ export function App() {
       </section>
 
       <footer className="made-by-credit">
-        <span>Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</span>
-        <a href="https://github.com/21J3phy/triple-integral-3d-visualizer" target="_blank" rel="noreferrer">
-          <Github size={16} aria-hidden="true" />
-          GitHub
-        </a>
+        <div className="credit-links">
+          <span>Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</span>
+          <a href="https://github.com/21J3phy/triple-integral-3d-visualizer" target="_blank" rel="noreferrer">
+            <Github size={16} aria-hidden="true" />
+            GitHub
+          </a>
+          <a href="https://www.linkedin.com/in/niravss/" target="_blank" rel="noreferrer">
+            <Linkedin size={16} aria-hidden="true" />
+            LinkedIn
+          </a>
+        </div>
+        <SupportPanel />
       </footer>
     </main>
+  );
+}
+
+function SupportPanel() {
+  return (
+    <div className="footer-support" aria-label="Support this project">
+      <a className="bmc-footer-button" href={BUY_ME_COFFEE_URL} target="_blank" rel="noreferrer">
+        <span aria-hidden="true">📚</span>
+        Pay for my Textbooks
+      </a>
+      <img className="support-qr" src="/qr-code.png" alt="Buy Me a Coffee QR code" />
+    </div>
   );
 }
 
