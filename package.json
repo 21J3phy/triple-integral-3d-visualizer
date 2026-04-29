@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "@vitejs/plugin-react": "^5.0.4",
     "lucide-react": "^0.468.0",
     "mathjs": "^13.2.3",

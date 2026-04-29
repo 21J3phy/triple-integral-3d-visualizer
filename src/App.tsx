@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { AlertTriangle, Calculator, Check, Github, GripVertical, Link, Linkedin, Share2 } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
@@ -383,6 +384,7 @@ export function App() {
         </div>
         <SupportPanel />
       </footer>
+      <Analytics />
     </main>
   );
 }
