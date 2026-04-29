@@ -310,12 +310,11 @@ export function App() {
             <span>Volume {sample.estimatedVolume.toFixed(5)}</span>
             <span>Jacobian {sample.jacobianLabel}</span>
             <span>{COORDINATE_LABELS[input.coordinateSystem]}</span>
-            <span>{sample.quality} quality</span>
           </div>
         </aside>
       </section>
 
-      <p className="made-by-credit">Made by Nirav with GPT-5.5 for Indy Multivariable Calculus 25-26.</p>
+      <p className="made-by-credit">Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</p>
     </main>
   );
 }
