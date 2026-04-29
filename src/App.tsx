@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { AlertTriangle, Calculator, GripVertical } from 'lucide-react';
+import { AlertTriangle, Calculator, Github, GripVertical } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
 import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
@@ -314,7 +314,13 @@ export function App() {
         </aside>
       </section>
 
-      <p className="made-by-credit">Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</p>
+      <footer className="made-by-credit">
+        <span>Made by Nirav with GPT-5.5 for Mrs. Augsburger&apos;s 3rd Block Multi class, 25-26.</span>
+        <a href="https://github.com/21J3phy/triple-integral-3d-visualizer" target="_blank" rel="noreferrer">
+          <Github size={16} aria-hidden="true" />
+          GitHub
+        </a>
+      </footer>
     </main>
   );
 }
