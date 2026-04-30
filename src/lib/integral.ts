@@ -10,7 +10,7 @@ import type {
   Variable,
   IntegralInput,
 } from '../types';
-import { areValidVariables, coordinateJacobian, fromCartesian, jacobianLabel, toCartesian } from './coordinates';
+import { areValidVariables, coordinateJacobian, defaultJacobianExpression, fromCartesian, toCartesian } from './coordinates';
 import { normalizeExpressionAliases } from './expressionAliases';
 import { allOrdersForVariables, orderToInnerOuter, orderToOuterInner } from './orders';
 
@@ -20,6 +20,8 @@ const ALLOWED_NON_VARIABLE_SYMBOLS = new Set(['e', 'E', 'i', 'Infinity', 'NaN', 
 type Scope = Partial<Record<Variable, number>>;
 type Exponents = [number, number, number];
 type Polynomial = Map<string, ExactScalar>;
+type TrigExponents = [number, number, number, number, number, number, number, number, number];
+type TrigExpression = Map<string, ExactScalar>;
 
 export interface ExactIntegralResult {
   fraction: string;
@@ -32,6 +34,7 @@ export function parseIntegral(input: IntegralInput): ParsedIntegral {
   const orderOuterToInner = orderToOuterInner(input.selectedOrder);
   const compiledBounds: ParsedIntegral['bounds'] = {};
   let integrand: ParsedIntegral['integrand'];
+  let jacobian: ParsedIntegral['jacobian'];
 
   if (!areValidVariables(input.variables)) {
     validationErrors.push('Variables must be three unique names using letters, numbers, and underscores.');
@@ -46,6 +49,17 @@ export function parseIntegral(input: IntegralInput): ParsedIntegral {
     integrand = node.compile();
   } catch (error) {
     validationErrors.push(`Integrand could not be parsed: ${messageFrom(error)}.`);
+  }
+
+  try {
+    const node = math.parse(normalizeExpression(jacobianExpressionForInput(input), input)) as MathNode;
+    const unknown = unknownSymbols(node, input.variables);
+    if (unknown.length) {
+      validationErrors.push(`Jacobian has unknown symbol(s): ${unknown.join(', ')}.`);
+    }
+    jacobian = node.compile();
+  } catch (error) {
+    validationErrors.push(`Jacobian could not be parsed: ${messageFrom(error)}.`);
   }
 
   for (const variable of input.variables) {
@@ -81,13 +95,14 @@ export function parseIntegral(input: IntegralInput): ParsedIntegral {
     orderInnerToOuter,
     orderOuterToInner,
     integrand,
+    jacobian,
     bounds: compiledBounds,
     validationErrors,
   };
 }
 
 export function sampleRegion(parsed: ParsedIntegral, sampleBudget = 7000): RegionSample {
-  if (parsed.validationErrors.length || !parsed.integrand) {
+  if (parsed.validationErrors.length || !parsed.integrand || !parsed.jacobian) {
     return emptySample(parsed.input, parsed.validationErrors);
   }
 
@@ -116,7 +131,7 @@ export function sampleRegion(parsed: ParsedIntegral, sampleBudget = 7000): Regio
     coordinateBoundingBox,
     coordinateSystem: parsed.input.coordinateSystem,
     variables: parsed.input.variables,
-    jacobianLabel: jacobianLabel(parsed.input.coordinateSystem, parsed.input.variables),
+    jacobianLabel: jacobianExpressionForInput(parsed.input),
     estimatedVolume: nested.volume,
     integralEstimate: nested.integral,
     confidenceRadius: nested.confidenceRadius,
@@ -128,20 +143,18 @@ export function sampleRegion(parsed: ParsedIntegral, sampleBudget = 7000): Regio
 }
 
 export function solveIntegralExactly(parsed: ParsedIntegral): ExactIntegralResult | null {
+  return solvePolynomialIntegralExactly(parsed) ?? solveTrigIntegralExactly(parsed);
+}
+
+function solvePolynomialIntegralExactly(parsed: ParsedIntegral): ExactIntegralResult | null {
   if (parsed.validationErrors.length) return null;
 
   const variables = parsed.input.variables;
   let polynomial = parsePolynomial(parsed.input.integrand, parsed.input, variables);
   if (!polynomial) return null;
-
-  let sineJacobianVariable: number | null = null;
-  if (parsed.input.coordinateSystem === 'cylindrical') {
-    polynomial = multiplyPolynomials(polynomial, variablePolynomial(variables.indexOf(variables[0])));
-  } else if (parsed.input.coordinateSystem === 'spherical') {
-    const radiusIndex = variables.indexOf(variables[0]);
-    sineJacobianVariable = variables.indexOf(variables[2]);
-    polynomial = multiplyPolynomials(polynomial, powerPolynomial(variablePolynomial(radiusIndex), 2));
-  }
+  const jacobian = parsePolynomial(jacobianExpressionForInput(parsed.input), parsed.input, variables);
+  if (!jacobian) return null;
+  polynomial = multiplyPolynomials(polynomial, jacobian);
 
   for (const variable of parsed.orderInnerToOuter) {
     const variableIndex = variables.indexOf(variable);
@@ -149,13 +162,6 @@ export function solveIntegralExactly(parsed: ParsedIntegral): ExactIntegralResul
     const lower = parsePolynomial(bounds.lower, parsed.input, variables);
     const upper = parsePolynomial(bounds.upper, parsed.input, variables);
     if (!lower || !upper) return null;
-
-    if (variableIndex === sineJacobianVariable) {
-      const sineIntegral = integrateSineJacobian(lower, upper);
-      if (!sineIntegral || polynomialDependsOn(polynomial, variableIndex)) return null;
-      polynomial = multiplyPolynomialByScalar(polynomial, sineIntegral);
-      continue;
-    }
 
     const antiderivative = integratePolynomial(polynomial, variableIndex);
     polynomial = subtractPolynomials(
@@ -278,16 +284,17 @@ function sampleNested(parsed: ParsedIntegral, sampleBudget: number, rng: () => n
     }
 
     const coordinateScope = Object.fromEntries(parsed.input.variables.map((variable) => [variable, scope[variable] ?? 0])) as Record<Variable, number>;
-    const transformJacobian = coordinateJacobian(parsed.input.coordinateSystem, parsed.input.variables, coordinateScope);
-    const jacobian = intervalVolume * transformJacobian;
+    const regionJacobian = intervalVolume * coordinateJacobian(parsed.input.coordinateSystem, parsed.input.variables, coordinateScope);
+    const userJacobianValue = evaluate(parsed.jacobian!, scope);
+    const integralJacobian = intervalVolume * (Number.isFinite(userJacobianValue) ? userJacobianValue : 0);
     const point = toCartesian(parsed.input.coordinateSystem, parsed.input.variables, coordinateScope);
 
     if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z)) {
       points.push(point);
       coordinatePoints.push(coordinateScope);
       const f = evaluate(parsed.integrand!, scope);
-      const contribution = Number.isFinite(f) ? f * jacobian : 0;
-      weightedVolumes.push(jacobian);
+      const contribution = Number.isFinite(f) ? f * integralJacobian : 0;
+      weightedVolumes.push(regionJacobian);
       weightedIntegrands.push(contribution);
     } else {
       weightedVolumes.push(0);
@@ -319,7 +326,7 @@ function emptySample(input: IntegralInput, warnings: string[]): RegionSample {
     coordinateBoundingBox,
     coordinateSystem: input.coordinateSystem,
     variables: input.variables,
-    jacobianLabel: jacobianLabel(input.coordinateSystem, input.variables),
+    jacobianLabel: jacobianExpressionForInput(input),
     estimatedVolume: 0,
     integralEstimate: 0,
     confidenceRadius: 0,
@@ -337,6 +344,42 @@ function evaluate(compiled: { evaluate: (scope?: object) => unknown }, scope: Sc
   } catch {
     return NaN;
   }
+}
+
+function solveTrigIntegralExactly(parsed: ParsedIntegral): ExactIntegralResult | null {
+  if (parsed.validationErrors.length) return null;
+
+  const variables = parsed.input.variables;
+  let expression = parseTrigExpression(parsed.input.integrand, parsed.input, variables);
+  if (!expression) return null;
+  const jacobian = parseTrigExpression(jacobianExpressionForInput(parsed.input), parsed.input, variables);
+  if (!jacobian) return null;
+  expression = multiplyTrigExpressions(expression, jacobian);
+
+  for (const variable of parsed.orderInnerToOuter) {
+    const variableIndex = variables.indexOf(variable);
+    const bounds = parsed.input.bounds[variable];
+    const lower = constantTrigValue(bounds.lower, parsed.input, variables);
+    const upper = constantTrigValue(bounds.upper, parsed.input, variables);
+    if (!lower || !upper) return null;
+
+    let next: TrigExpression = new Map();
+    for (const [key, coefficient] of expression) {
+      const exponents = trigExponentsFor(key);
+      const integral = integrateTrigMonomial(exponents, variableIndex, lower, upper);
+      if (!integral) return null;
+      clearTrigVariable(exponents, variableIndex);
+      next = addTrigExpressions(next, constantTrigExpression(coefficient.multiply(integral), exponents));
+    }
+    expression = next;
+  }
+
+  const value = constantTrigTerm(expression);
+  if (!value) return null;
+  return {
+    fraction: value.toString(),
+    decimal: value.toNumber(),
+  };
 }
 
 class Fraction {
@@ -539,6 +582,19 @@ function parsePolynomial(expression: string, input: IntegralInput, variables: [V
   }
 }
 
+function parseTrigExpression(expression: string, input: IntegralInput, variables: [Variable, Variable, Variable]): TrigExpression | null {
+  try {
+    return nodeToTrigExpression(math.parse(normalizeExpression(expression, input)) as MathNode, variables);
+  } catch {
+    return null;
+  }
+}
+
+function constantTrigValue(expression: string, input: IntegralInput, variables: [Variable, Variable, Variable]): ExactScalar | null {
+  const parsed = parseTrigExpression(expression, input, variables);
+  return parsed ? constantTrigTerm(parsed) : null;
+}
+
 function nodeToPolynomial(node: MathNode, variables: [Variable, Variable, Variable]): Polynomial | null {
   const typedNode = node as MathNode & {
     args?: MathNode[];
@@ -590,6 +646,70 @@ function nodeToPolynomial(node: MathNode, variables: [Variable, Variable, Variab
     const exponent = constantTerm(right);
     const power = exponent?.integerValue();
     return power != null && Number.isInteger(power) && power >= 0 ? powerPolynomial(left, power) : null;
+  }
+
+  return null;
+}
+
+function nodeToTrigExpression(node: MathNode, variables: [Variable, Variable, Variable]): TrigExpression | null {
+  const typedNode = node as MathNode & {
+    args?: MathNode[];
+    content?: MathNode;
+    fn?: string | MathNode;
+    isConstantNode?: boolean;
+    isFunctionNode?: boolean;
+    isOperatorNode?: boolean;
+    isParenthesisNode?: boolean;
+    isSymbolNode?: boolean;
+    name?: string;
+    op?: string;
+    value?: string | number;
+  };
+
+  if (typedNode.isParenthesisNode && typedNode.content) return nodeToTrigExpression(typedNode.content, variables);
+
+  if (typedNode.isConstantNode && typedNode.value != null) {
+    const coefficient = ExactScalar.fromString(String(typedNode.value));
+    return coefficient ? constantTrigExpression(coefficient) : null;
+  }
+
+  if (typedNode.isSymbolNode && typedNode.name) {
+    const variableIndex = variables.indexOf(typedNode.name);
+    if (variableIndex >= 0) return trigVariable(variableIndex);
+    if (typedNode.name === 'pi' || typedNode.name === 'PI') return constantTrigExpression(ExactScalar.pi());
+    if (typedNode.name === 'tau') return constantTrigExpression(ExactScalar.fromInteger(2).multiply(ExactScalar.pi()));
+    return null;
+  }
+
+  if (typedNode.isFunctionNode && typedNode.args?.length === 1) {
+    const name = functionName(typedNode.fn);
+    if (name !== 'sin' && name !== 'cos') return null;
+    const variableIndex = variableNodeIndex(typedNode.args[0], variables);
+    return variableIndex == null ? null : trigFunctionExpression(name, variableIndex);
+  }
+
+  if (!typedNode.isOperatorNode || !typedNode.args) return null;
+
+  if (typedNode.fn === 'unaryMinus') {
+    const value = nodeToTrigExpression(typedNode.args[0], variables);
+    return value ? negateTrigExpression(value) : null;
+  }
+
+  const [leftNode, rightNode] = typedNode.args;
+  const left = nodeToTrigExpression(leftNode, variables);
+  const right = rightNode ? nodeToTrigExpression(rightNode, variables) : null;
+
+  if (typedNode.op === '+' && left && right) return addTrigExpressions(left, right);
+  if (typedNode.op === '-' && left && right) return subtractTrigExpressions(left, right);
+  if (typedNode.op === '*' && left && right) return multiplyTrigExpressions(left, right);
+  if (typedNode.op === '/' && left && right) {
+    const scalar = constantTrigTerm(right);
+    return scalar ? divideTrigExpression(left, scalar) : null;
+  }
+  if (typedNode.op === '^' && left && right) {
+    const exponent = constantTrigTerm(right);
+    const power = exponent?.integerValue();
+    return power != null && Number.isInteger(power) && power >= 0 ? powerTrigExpression(left, power) : null;
   }
 
   return null;
@@ -712,6 +832,189 @@ function multiplyPolynomialByScalar(polynomial: Polynomial, scalar: ExactScalar)
   return mapPolynomial(polynomial, (coefficient) => coefficient.multiply(scalar));
 }
 
+function constantTrigExpression(coefficient: ExactScalar, exponents: TrigExponents = zeroTrigExponents()): TrigExpression {
+  return coefficient.isZero() ? new Map() : new Map([[trigKeyFor(exponents), coefficient]]);
+}
+
+function trigVariable(variableIndex: number): TrigExpression {
+  const exponents = zeroTrigExponents();
+  exponents[variableIndex] = 1;
+  return constantTrigExpression(ExactScalar.one(), exponents);
+}
+
+function trigFunctionExpression(kind: 'sin' | 'cos', variableIndex: number): TrigExpression {
+  const exponents = zeroTrigExponents();
+  exponents[(kind === 'sin' ? 3 : 6) + variableIndex] = 1;
+  return constantTrigExpression(ExactScalar.one(), exponents);
+}
+
+function addTrigExpressions(left: TrigExpression, right: TrigExpression): TrigExpression {
+  const result = new Map(left);
+  for (const [key, coefficient] of right) {
+    setTrigTerm(result, key, (result.get(key) ?? ExactScalar.zero()).add(coefficient));
+  }
+  return result;
+}
+
+function subtractTrigExpressions(left: TrigExpression, right: TrigExpression): TrigExpression {
+  return addTrigExpressions(left, negateTrigExpression(right));
+}
+
+function negateTrigExpression(expression: TrigExpression): TrigExpression {
+  return mapTrigExpression(expression, (coefficient) => coefficient.negate());
+}
+
+function multiplyTrigExpressions(left: TrigExpression, right: TrigExpression): TrigExpression {
+  const result: TrigExpression = new Map();
+  for (const [leftKey, leftCoefficient] of left) {
+    const leftExponents = trigExponentsFor(leftKey);
+    for (const [rightKey, rightCoefficient] of right) {
+      const rightExponents = trigExponentsFor(rightKey);
+      const exponents = leftExponents.map((exponent, index) => exponent + rightExponents[index]) as TrigExponents;
+      const key = trigKeyFor(exponents);
+      setTrigTerm(result, key, (result.get(key) ?? ExactScalar.zero()).add(leftCoefficient.multiply(rightCoefficient)));
+    }
+  }
+  return result;
+}
+
+function divideTrigExpression(expression: TrigExpression, scalar: ExactScalar): TrigExpression | null {
+  if (scalar.isZero()) return null;
+  const result: TrigExpression = new Map();
+  for (const [key, coefficient] of expression) {
+    const divided = coefficient.divide(scalar);
+    if (!divided) return null;
+    setTrigTerm(result, key, divided);
+  }
+  return result;
+}
+
+function powerTrigExpression(expression: TrigExpression, power: number): TrigExpression {
+  let result = constantTrigExpression(ExactScalar.one());
+  for (let index = 0; index < power; index += 1) {
+    result = multiplyTrigExpressions(result, expression);
+  }
+  return result;
+}
+
+function mapTrigExpression(expression: TrigExpression, map: (coefficient: ExactScalar) => ExactScalar): TrigExpression {
+  const result: TrigExpression = new Map();
+  for (const [key, coefficient] of expression) {
+    setTrigTerm(result, key, map(coefficient));
+  }
+  return result;
+}
+
+function constantTrigTerm(expression: TrigExpression): ExactScalar | null {
+  if (expression.size === 0) return ExactScalar.zero();
+  if (expression.size === 1) return expression.get(trigKeyFor(zeroTrigExponents())) ?? null;
+  return null;
+}
+
+function integrateTrigMonomial(exponents: TrigExponents, variableIndex: number, lower: ExactScalar, upper: ExactScalar): ExactScalar | null {
+  const power = exponents[variableIndex];
+  const sinePower = exponents[3 + variableIndex];
+  const cosinePower = exponents[6 + variableIndex];
+
+  if (sinePower === 0 && cosinePower === 0) return integratePower(power, lower, upper);
+  if (power !== 0) return null;
+
+  return integrateTrigPower(sinePower, cosinePower, lower, upper);
+}
+
+function integratePower(power: number, lower: ExactScalar, upper: ExactScalar): ExactScalar | null {
+  const nextPower = power + 1;
+  const numerator = powerScalar(upper, nextPower).subtract(powerScalar(lower, nextPower));
+  return numerator.divide(ExactScalar.fromInteger(nextPower));
+}
+
+function integrateTrigPower(sinePower: number, cosinePower: number, lower: ExactScalar, upper: ExactScalar): ExactScalar | null {
+  const lowerMultiple = lower.rationalPiMultiple();
+  const upperMultiple = upper.rationalPiMultiple();
+  if (!lowerMultiple || !upperMultiple) return null;
+
+  const lowerKey = lowerMultiple.toString();
+  const upperKey = upperMultiple.toString();
+
+  if (sinePower === 0 && cosinePower === 0) return upper.subtract(lower);
+  if (sinePower === 1 && cosinePower === 0) {
+    const lowerCosine = cosineOfPiMultiple(lower);
+    const upperCosine = cosineOfPiMultiple(upper);
+    return lowerCosine && upperCosine ? lowerCosine.subtract(upperCosine) : null;
+  }
+  if (sinePower === 0 && cosinePower === 1) {
+    const lowerSine = sineOfPiMultiple(lower);
+    const upperSine = sineOfPiMultiple(upper);
+    return lowerSine && upperSine ? upperSine.subtract(lowerSine) : null;
+  }
+
+  if (lowerKey === '0' && upperKey === '1') return integrateZeroToPi(sinePower, cosinePower);
+  if (lowerKey === '0' && upperKey === '2') return integrateZeroToTwoPi(sinePower, cosinePower);
+  return null;
+}
+
+function integrateZeroToPi(sinePower: number, cosinePower: number): ExactScalar | null {
+  if (cosinePower % 2 === 1) return ExactScalar.zero();
+  if (cosinePower === 0) return integrateSineZeroToPi(sinePower);
+  return null;
+}
+
+function integrateZeroToTwoPi(sinePower: number, cosinePower: number): ExactScalar | null {
+  if (sinePower % 2 === 1 || cosinePower % 2 === 1) return ExactScalar.zero();
+  if (sinePower === 0 && cosinePower === 0) return ExactScalar.fromInteger(2).multiply(ExactScalar.pi());
+  if ((sinePower === 2 && cosinePower === 0) || (sinePower === 0 && cosinePower === 2)) return ExactScalar.pi();
+  return null;
+}
+
+function integrateSineZeroToPi(power: number): ExactScalar | null {
+  if (power === 0) return ExactScalar.pi();
+  if (power === 1) return ExactScalar.fromInteger(2);
+  if (power === 2) return ExactScalar.pi().divide(ExactScalar.fromInteger(2));
+  if (power === 3) return ExactScalar.fromFraction(Fraction.fromInteger(4).divide(Fraction.fromInteger(3))!);
+  return null;
+}
+
+function powerScalar(value: ExactScalar, power: number): ExactScalar {
+  let result = ExactScalar.one();
+  for (let index = 0; index < power; index += 1) {
+    result = result.multiply(value);
+  }
+  return result;
+}
+
+function sineOfPiMultiple(value: ExactScalar): ExactScalar | null {
+  const multiple = value.rationalPiMultiple();
+  if (!multiple) return null;
+
+  const normalized = positiveModulo(multiple.numerator, multiple.denominator * 2n);
+  const denominator = multiple.denominator;
+  if (normalized === 0n || normalized === denominator) return ExactScalar.zero();
+  if (normalized * 2n === denominator) return ExactScalar.one();
+  if (normalized * 2n === denominator * 3n) return ExactScalar.fromInteger(-1);
+  return null;
+}
+
+function clearTrigVariable(exponents: TrigExponents, variableIndex: number) {
+  exponents[variableIndex] = 0;
+  exponents[3 + variableIndex] = 0;
+  exponents[6 + variableIndex] = 0;
+}
+
+function functionName(fn: string | MathNode | undefined): string | null {
+  if (!fn) return null;
+  if (typeof fn === 'string') return fn;
+  const symbol = fn as MathNode & { name?: string };
+  return symbol.name ?? null;
+}
+
+function variableNodeIndex(node: MathNode, variables: [Variable, Variable, Variable]): number | null {
+  const typedNode = node as MathNode & { content?: MathNode; isParenthesisNode?: boolean; isSymbolNode?: boolean; name?: string };
+  if (typedNode.isParenthesisNode && typedNode.content) return variableNodeIndex(typedNode.content, variables);
+  if (!typedNode.isSymbolNode || !typedNode.name) return null;
+  const index = variables.indexOf(typedNode.name);
+  return index >= 0 ? index : null;
+}
+
 function constantTerm(polynomial: Polynomial): ExactScalar | null {
   if (polynomial.size === 0) return ExactScalar.zero();
   if (polynomial.size === 1) return polynomial.get(keyFor([0, 0, 0])) ?? null;
@@ -729,6 +1032,11 @@ function mapPolynomial(polynomial: Polynomial, map: (coefficient: ExactScalar) =
 function setTerm(polynomial: Polynomial, key: string, coefficient: ExactScalar) {
   if (coefficient.isZero()) polynomial.delete(key);
   else polynomial.set(key, coefficient);
+}
+
+function setTrigTerm(expression: TrigExpression, key: string, coefficient: ExactScalar) {
+  if (coefficient.isZero()) expression.delete(key);
+  else expression.set(key, coefficient);
 }
 
 function setScalarTerm(terms: Map<number, Fraction>, power: number, coefficient: Fraction) {
@@ -756,6 +1064,18 @@ function exponentsFor(key: string): Exponents {
   return key.split(',').map(Number) as Exponents;
 }
 
+function zeroTrigExponents(): TrigExponents {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+function trigKeyFor(exponents: TrigExponents): string {
+  return exponents.join(',');
+}
+
+function trigExponentsFor(key: string): TrigExponents {
+  return key.split(',').map(Number) as TrigExponents;
+}
+
 function gcd(left: bigint, right: bigint): bigint {
   while (right !== 0n) {
     const next = left % right;
@@ -775,6 +1095,10 @@ function positiveModulo(value: bigint, modulus: bigint): bigint {
 
 function normalizeExpression(expression: string, input: IntegralInput): string {
   return normalizeExpressionAliases(expression, input.coordinateSystem, input.variables);
+}
+
+function jacobianExpressionForInput(input: IntegralInput): string {
+  return '1';
 }
 
 function unknownSymbols(node: MathNode, variables: Variable[]): string[] {

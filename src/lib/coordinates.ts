@@ -61,6 +61,10 @@ export function coordinateJacobian(system: CoordinateSystem, variables: [Variabl
 }
 
 export function jacobianLabel(system: CoordinateSystem, variables: [Variable, Variable, Variable]): string {
+  return defaultJacobianExpression(system, variables);
+}
+
+export function defaultJacobianExpression(system: CoordinateSystem, variables: [Variable, Variable, Variable]): string {
   if (system === 'cylindrical') return variables[0];
   if (system === 'spherical') return `${variables[0]}^2 sin(${variables[2]})`;
   return '1';
@@ -122,8 +126,16 @@ export function convertIntegralToCoordinateSystem(input: IntegralInput, targetSy
   const transformedIntegrand = transformExpression(input.integrand, input.coordinateSystem, input.variables, targetSystem, targetVariables);
   const converted = convertBounds(input, targetSystem, targetVariables);
 
+  const jacobian = defaultJacobianExpression(targetSystem, targetVariables);
+  const trimmedIntegrand = transformedIntegrand.trim();
+  const integrandWithJacobian = jacobian === '1'
+    ? transformedIntegrand
+    : (!trimmedIntegrand || trimmedIntegrand === '1')
+      ? jacobian
+      : `(${transformedIntegrand}) * ${jacobian}`;
+
   return {
-    integrand: transformedIntegrand,
+    integrand: integrandWithJacobian,
     coordinateSystem: targetSystem,
     variables: targetVariables,
     selectedOrder: converted.selectedOrder,

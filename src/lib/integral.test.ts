@@ -4,6 +4,7 @@ import { convertIntegralToCoordinateSystem } from './coordinates';
 import { parseIntegral, sampleRegion, estimateSwitchedBounds, solveIntegralExactly } from './integral';
 import { buildCoordinateSliceGeometries, type CoordinateSliceGeometry } from './sliceGeometry';
 import { PRESETS } from './presets';
+import { withJacobianDefault } from './sharing';
 import type { IntegralInput } from '../types';
 
 const cube: IntegralInput = {
@@ -208,6 +209,47 @@ describe('solveIntegralExactly', () => {
     );
 
     expect(exact?.fraction).toBe('4π/5');
+  });
+
+  it('solves spherical trig integrals with an editable Jacobian field', () => {
+    const exact = solveIntegralExactly(
+      parseIntegral({
+        integrand: 'rho*sin(theta)sin(phi)+rho*cos(theta)sin(phi)+4',
+        jacobian: 'rho^2*sin(phi)',
+        coordinateSystem: 'spherical',
+        variables: ['ρ', 'θ', 'φ'],
+        selectedOrder: 'dρ dφ dθ',
+        bounds: {
+          ρ: { lower: '0', upper: '3' },
+          θ: { lower: '0', upper: '2pi' },
+          φ: { lower: '0', upper: 'pi' },
+        },
+      }),
+    );
+
+    expect(exact?.fraction).toBe('144π');
+    expect(exact?.decimal).toBeCloseTo(144 * Math.PI);
+  });
+
+  it('migrates legacy shared spherical integrals that already include the Jacobian', () => {
+    const migrated = withJacobianDefault({
+      integrand: '(rho*sin(theta)sin(phi)+rho*cos(theta)sin(phi)+4)rho^2*sin(phi)',
+      coordinateSystem: 'spherical',
+      variables: ['ρ', 'θ', 'φ'],
+      selectedOrder: 'dρ dφ dθ',
+      bounds: {
+        ρ: { lower: '0', upper: '3' },
+        θ: { lower: '0', upper: '2pi' },
+        φ: { lower: '0', upper: 'pi' },
+      },
+    });
+    const exact = solveIntegralExactly(
+      parseIntegral(migrated),
+    );
+
+    expect(migrated.showJacobian).toBe(false);
+    expect(migrated.jacobian).toBe('1');
+    expect(exact?.fraction).toBe('144π');
   });
 
   it('returns null for non-polynomial Cartesian inputs that need numeric estimation', () => {

@@ -28,12 +28,16 @@ export function decodeEquation(encoded: string): IntegralInput | null {
       typeof parsed.selectedOrder === 'string' &&
       typeof parsed.bounds === 'object'
     ) {
-      return parsed as IntegralInput;
+      return withJacobianDefault(parsed as IntegralInput);
     }
     return null;
   } catch {
     return null;
   }
+}
+
+export function withJacobianDefault(input: IntegralInput): IntegralInput {
+  return input;
 }
 
 /**

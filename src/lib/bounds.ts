@@ -34,6 +34,8 @@ function renameIntegralVariables(input: IntegralInput, variableMap: VariableMap,
 
   return {
     ...input,
+    integrand: renameExpressionVariables(input.integrand, variableMap),
+    jacobian: input.jacobian ? renameExpressionVariables(input.jacobian, variableMap) : input.jacobian,
     selectedOrder: orderFromOuterToInner(nextOuterToInner),
     bounds: bounds as Record<Variable, BoundPair>,
   };

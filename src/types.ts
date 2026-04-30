@@ -12,6 +12,8 @@ export interface BoundPair {
 
 export interface IntegralInput {
   integrand: string;
+  jacobian?: string;
+  showJacobian?: boolean;
   coordinateSystem: CoordinateSystem;
   variables: [Variable, Variable, Variable];
   selectedOrder: BoundOrder;
@@ -23,6 +25,7 @@ export interface ParsedIntegral {
   orderInnerToOuter: Variable[];
   orderOuterToInner: Variable[];
   integrand?: EvalFunction;
+  jacobian?: EvalFunction;
   bounds: Partial<Record<Variable, { lower: EvalFunction; upper: EvalFunction }>>;
   validationErrors: string[];
 }

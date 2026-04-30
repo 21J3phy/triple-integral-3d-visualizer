@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { Analytics } from '@vercel/analytics/react';
-import { AlertTriangle, Bookmark, Calculator, Check, Github, GripVertical, Link, Linkedin, MoveHorizontal, Share2 } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Bookmark, Calculator, Check, ChevronDown, ChevronUp, Eye, EyeOff, FilePlus2, Github, GripVertical, Keyboard, Link, Linkedin, MoveHorizontal, Share2, X } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
 import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
@@ -8,11 +8,13 @@ import { parseIntegral, sampleRegion, solveIntegralExactly } from './lib/integra
 import { orderFromOuterToInner, orderToOuterInner } from './lib/orders';
 import { PRESETS } from './lib/presets';
 import { PresetPreview } from './components/PresetPreview';
-import { buildShareUrl, copyToClipboard, getSharedEquation } from './lib/sharing';
+import { buildShareUrl, copyToClipboard, getSharedEquation, withJacobianDefault } from './lib/sharing';
+import { MathField } from './components/MathField';
+import { autoReplaceMathSymbols } from './lib/mathSymbols';
 import type { CoordinateSystem, IntegralInput, Variable } from './types';
 
 const SHARED_INPUT = getSharedEquation();
-const STARTER = SHARED_INPUT ?? PRESETS[1].input;
+const STARTER = withJacobianDefault(SHARED_INPUT ?? PRESETS[1].input);
 const SAMPLE_COUNT = 8000;
 const SWAP_ANIMATION_MS = 260;
 const MIN_SLICE_COUNT = 1;
@@ -21,17 +23,64 @@ const SLICE_COUNT_WARNING_THRESHOLD = 20;
 const BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/21J3phy';
 const COORDINATE_SYSTEMS = Object.keys(COORDINATE_LABELS) as CoordinateSystem[];
 type ElementRects = Partial<Record<Variable, DOMRect>>;
+type BoundSide = 'lower' | 'upper';
+type ExpressionTarget = { kind: 'integrand' } | { kind: 'bound'; variable: Variable; side: BoundSide };
+
+const SYMBOL_KEYBOARD_GROUPS: Array<{
+  label: string;
+  keys: Array<{ label: string; insert: string; caretOffset?: number; title: string }>;
+}> = [
+  {
+    label: 'Symbols',
+    keys: [
+      { label: 'ρ', insert: 'rho', title: 'rho' },
+      { label: 'θ', insert: 'theta', title: 'theta' },
+      { label: 'φ', insert: 'phi', title: 'phi' },
+      { label: 'π', insert: 'pi', title: 'pi' },
+      { label: 'e', insert: 'e', title: 'Euler constant' },
+    ],
+  },
+  {
+    label: 'Functions',
+    keys: [
+      { label: '√', insert: 'sqrt()', caretOffset: 5, title: 'sqrt()' },
+      { label: 'sin', insert: 'sin()', caretOffset: 4, title: 'sin()' },
+      { label: 'cos', insert: 'cos()', caretOffset: 4, title: 'cos()' },
+      { label: 'tan', insert: 'tan()', caretOffset: 4, title: 'tan()' },
+      { label: 'log', insert: 'log()', caretOffset: 4, title: 'log()' },
+      { label: 'abs', insert: 'abs()', caretOffset: 4, title: 'abs()' },
+    ],
+  },
+  {
+    label: 'Operators',
+    keys: [
+      { label: 'x²', insert: '^2', title: 'square' },
+      { label: '^', insert: '^', title: 'power' },
+      { label: '+', insert: ' + ', title: 'plus' },
+      { label: '−', insert: ' - ', title: 'minus' },
+      { label: '×', insert: ' * ', title: 'multiply' },
+      { label: '÷', insert: ' / ', title: 'divide' },
+      { label: '(', insert: '(', title: 'left parenthesis' },
+      { label: ')', insert: ')', title: 'right parenthesis' },
+    ],
+  },
+];
 
 export function App() {
   const [input, setInput] = useState<IntegralInput>(STARTER);
   const [variableDrafts, setVariableDrafts] = useState<[string, string, string]>(STARTER.variables);
   const [draggedVariable, setDraggedVariable] = useState<Variable | null>(null);
   const [dropVariable, setDropVariable] = useState<Variable | null>(null);
+  const [pendingCoordinateSystem, setPendingCoordinateSystem] = useState<CoordinateSystem | null>(null);
   const [{ sliceCount, selectedSlice }, setSliceSettings] = useState({ sliceCount: 7, selectedSlice: 7 });
+  const [isResultVisible, setIsResultVisible] = useState(true);
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
   const [isShared] = useState(!!SHARED_INPUT);
   const integralRefs = useRef<Partial<Record<Variable, HTMLDivElement>>>({});
-  const differentialRefs = useRef<Partial<Record<Variable, HTMLSpanElement>>>({});
+  const differentialRefs = useRef<Partial<Record<Variable, HTMLButtonElement>>>({});
+  const expressionInputRefs = useRef<Record<string, HTMLInputElement>>({});
+  const activeExpressionTarget = useRef<ExpressionTarget>({ kind: 'integrand' });
+  const pendingSelection = useRef<{ key: string; position: number } | null>(null);
   const previousIntegralRects = useRef<ElementRects | null>(null);
   const previousDifferentialRects = useRef<ElementRects | null>(null);
 
@@ -43,16 +92,18 @@ export function App() {
   const innerToOuter = [...outerToInner].reverse();
   const selectedCoordinateIndex = COORDINATE_SYSTEMS.indexOf(input.coordinateSystem);
 
+
   useEffect(() => {
     setVariableDrafts(input.variables);
   }, [input.variables]);
 
   const updateBound = (variable: Variable, side: 'lower' | 'upper', value: string) => {
+    const nextValue = autoReplaceMathSymbols(value);
     setInput((current) => ({
       ...current,
       bounds: {
         ...current.bounds,
-        [variable]: { ...current.bounds[variable], [side]: value },
+        [variable]: { ...current.bounds[variable], [side]: nextValue },
       },
     }));
   };
@@ -71,10 +122,25 @@ export function App() {
     }));
   };
   const updateCoordinateSystem = (coordinateSystem: CoordinateSystem) => {
-    setInput((current) => convertIntegralToCoordinateSystem(current, coordinateSystem));
+    if (coordinateSystem === input.coordinateSystem) {
+      setPendingCoordinateSystem(null);
+      return;
+    }
+    setPendingCoordinateSystem(coordinateSystem);
+  };
+  const convertToPendingCoordinateSystem = () => {
+    if (!pendingCoordinateSystem) return;
+    setInput((current) => convertIntegralToCoordinateSystem(current, pendingCoordinateSystem));
+    setPendingCoordinateSystem(null);
+  };
+  const startFreshInPendingCoordinateSystem = () => {
+    if (!pendingCoordinateSystem) return;
+    setInput(defaultInputForCoordinateSystem(pendingCoordinateSystem));
+    setPendingCoordinateSystem(null);
   };
   const updateVariableDraft = (index: number, value: string) => {
-    const nextDrafts = variableDrafts.map((name, itemIndex) => (itemIndex === index ? value : name)) as [string, string, string];
+    const nextValue = autoReplaceMathSymbols(value);
+    const nextDrafts = variableDrafts.map((name, itemIndex) => (itemIndex === index ? nextValue : name)) as [string, string, string];
     setVariableDrafts(nextDrafts);
     if (areValidVariables(nextDrafts)) {
       setInput((current) => rewriteVariables(current, nextDrafts));
@@ -91,9 +157,54 @@ export function App() {
   const commitOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
+  const registerExpressionInput = (target: ExpressionTarget, element: HTMLInputElement | null) => {
+    const key = expressionTargetKey(target);
+    if (element) expressionInputRefs.current[key] = element;
+    else delete expressionInputRefs.current[key];
+  };
+  const selectExpressionTarget = (target: ExpressionTarget) => {
+    activeExpressionTarget.current = target;
+  };
+
+  const insertExpressionSnippet = (snippet: string, caretOffset = snippet.length) => {
+    const target = usableExpressionTarget(activeExpressionTarget.current, input);
+    const key = expressionTargetKey(target);
+    const element = expressionInputRefs.current[key];
+    const currentValue = expressionValue(target, input);
+    const start = element?.selectionStart ?? currentValue.length;
+    const end = element?.selectionEnd ?? start;
+    const nextValue = `${currentValue.slice(0, start)}${snippet}${currentValue.slice(end)}`;
+    pendingSelection.current = { key, position: start + caretOffset };
+    activeExpressionTarget.current = target;
+
+    const replacedValue = autoReplaceMathSymbols(nextValue);
+    setInput((current) => {
+      if (target.kind === 'integrand') return { ...current, integrand: replacedValue };
+      return {
+        ...current,
+        bounds: {
+          ...current.bounds,
+          [target.variable]: {
+            ...current.bounds[target.variable],
+            [target.side]: replacedValue,
+          },
+        },
+      };
+    });
+  };
+
+  useLayoutEffect(() => {
+    const selection = pendingSelection.current;
+    if (!selection) return;
+    pendingSelection.current = null;
+    const element = expressionInputRefs.current[selection.key] ?? expressionInputRefs.current.integrand;
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(selection.position, selection.position);
+  }, [input]);
 
   const handleShare = useCallback(async () => {
-    const url = buildShareUrl(input);
+    const url = buildShareUrl(withJacobianDefault(input));
     const success = await copyToClipboard(url);
     if (success) {
       setShareState('copied');
@@ -111,23 +222,9 @@ export function App() {
     else delete integralRefs.current[variable];
   };
 
-  const registerDifferential = (variable: Variable, element: HTMLSpanElement | null) => {
+  const registerDifferential = (variable: Variable, element: HTMLButtonElement | null) => {
     if (element) differentialRefs.current[variable] = element;
     else delete differentialRefs.current[variable];
-  };
-
-  const moveVariable = (from: Variable, to: Variable) => {
-    if (from === to) return;
-    captureSwapRects();
-    setInput((current) => {
-      const nextOuterToInner = orderToOuterInner(current.selectedOrder);
-      const fromIndex = nextOuterToInner.indexOf(from);
-      const toIndex = nextOuterToInner.indexOf(to);
-      if (fromIndex < 0 || toIndex < 0) return current;
-      nextOuterToInner.splice(fromIndex, 1);
-      nextOuterToInner.splice(toIndex, 0, from);
-      return rewriteBoundsForOrder(current, nextOuterToInner);
-    });
   };
 
   useLayoutEffect(() => {
@@ -138,19 +235,33 @@ export function App() {
   }, [outerToInner.join('|'), variables]);
 
   const dragTargetAt = (clientX: number, clientY: number): Variable | null => {
-    const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-integral-variable]');
-    const variable = element?.dataset.integralVariable;
+    const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-differential-variable]');
+    const variable = element?.dataset.differentialVariable;
     return variable && variables.includes(variable) ? variable : null;
   };
 
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+  const moveDifferential = (from: Variable, to: Variable) => {
+    if (from === to) return;
+    captureSwapRects();
+    setInput((current) => {
+      const nextInnerToOuter = [...orderToOuterInner(current.selectedOrder)].reverse();
+      const fromIndex = nextInnerToOuter.indexOf(from);
+      const toIndex = nextInnerToOuter.indexOf(to);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      nextInnerToOuter.splice(fromIndex, 1);
+      nextInnerToOuter.splice(toIndex, 0, from);
+      return rewriteBoundsForOrder(current, [...nextInnerToOuter].reverse());
+    });
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
     if (!draggedVariable) return;
     setDropVariable(dragTargetAt(event.clientX, event.clientY));
   };
 
-  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+  const handlePointerUp = (event: PointerEvent<HTMLElement>) => {
     const to = dragTargetAt(event.clientX, event.clientY);
-    if (draggedVariable && to) moveVariable(draggedVariable, to);
+    if (draggedVariable && to) moveDifferential(draggedVariable, to);
     setDraggedVariable(null);
     setDropVariable(null);
     event.currentTarget.releasePointerCapture(event.pointerId);
@@ -174,17 +285,46 @@ export function App() {
         <section className="equation-panel" aria-label="Triple integral input">
           <div className="coordinate-controls">
             <div className="coordinate-control">
-              <span id="coordinate-system-label">Coordinates</span>
+              {pendingCoordinateSystem ? (
+                <div
+                  className="coordinate-switch-choice"
+                  role="group"
+                  aria-label={`Switch to ${COORDINATE_LABELS[pendingCoordinateSystem]}`}
+                  style={{ '--pending-coordinate-index': COORDINATE_SYSTEMS.indexOf(pendingCoordinateSystem) } as CSSProperties}
+                >
+                  <div className="coordinate-switch-heading">
+                    <span>Switch to {COORDINATE_LABELS[pendingCoordinateSystem]}</span>
+                    <button
+                      className="coordinate-switch-close"
+                      type="button"
+                      onClick={() => setPendingCoordinateSystem(null)}
+                      aria-label="Cancel coordinate switch"
+                    >
+                      <X size={15} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="coordinate-switch-actions">
+                    <button className="coordinate-switch-action" type="button" onClick={convertToPendingCoordinateSystem}>
+                      <ArrowRightLeft size={16} aria-hidden="true" />
+                      <span>Convert Current</span>
+                    </button>
+                    <button className="coordinate-switch-action" type="button" onClick={startFreshInPendingCoordinateSystem}>
+                      <FilePlus2 size={16} aria-hidden="true" />
+                      <span>Start Fresh</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div
                 className="coordinate-slider"
                 role="radiogroup"
-                aria-labelledby="coordinate-system-label"
+                aria-label="Coordinate system"
                 style={{ '--coordinate-index': selectedCoordinateIndex } as CSSProperties}
               >
                 {COORDINATE_SYSTEMS.map((coordinateSystem) => (
                   <button
                     key={coordinateSystem}
-                    className={coordinateSystem === input.coordinateSystem ? 'active' : ''}
+                    className={`${coordinateSystem === input.coordinateSystem ? 'active' : ''}${coordinateSystem === pendingCoordinateSystem ? ' pending' : ''}`}
                     type="button"
                     role="radio"
                     aria-checked={coordinateSystem === input.coordinateSystem}
@@ -212,7 +352,7 @@ export function App() {
 
           <div className="integral-equation">
             <div className="integral-order-control">
-              <div className="integral-stack" aria-label="Drag integrals to change order">
+              <div className="integral-stack" aria-label="Integral bounds">
                 {outerToInner.map((variable) => (
                   <IntegralBlock
                     key={variable}
@@ -224,6 +364,35 @@ export function App() {
                     isDropTarget={dropVariable === variable && draggedVariable !== variable}
                     onLowerChange={(value) => updateBound(variable, 'lower', value)}
                     onUpperChange={(value) => updateBound(variable, 'upper', value)}
+                    onLowerFocus={() => selectExpressionTarget({ kind: 'bound', variable, side: 'lower' })}
+                    onUpperFocus={() => selectExpressionTarget({ kind: 'bound', variable, side: 'upper' })}
+                    registerLowerInput={(element) => registerExpressionInput({ kind: 'bound', variable, side: 'lower' }, element)}
+                    registerUpperInput={(element) => registerExpressionInput({ kind: 'bound', variable, side: 'upper' }, element)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <label className="expression-field integrand-field">
+              <span>Integrand</span>
+              <MathField
+                className="integrand-input"
+                placeholder="Integrand"
+                value={input.integrand}
+                onChange={(value) => setInput({ ...input, integrand: value })}
+                onFocus={() => selectExpressionTarget({ kind: 'integrand' })}
+              />
+            </label>
+
+            <div className="differential-order-control">
+              <div className="differentials" aria-label={`Order ${input.selectedOrder}`}>
+                {innerToOuter.map((variable) => (
+                  <DifferentialToken
+                    key={variable}
+                    variable={variable}
+                    registerElement={(element) => registerDifferential(variable, element)}
+                    isDragging={draggedVariable === variable}
+                    isDropTarget={dropVariable === variable && draggedVariable !== variable}
                     onPointerDown={(event) => {
                       setDraggedVariable(variable);
                       event.currentTarget.setPointerCapture(event.pointerId);
@@ -239,26 +408,11 @@ export function App() {
               </div>
               <p className="integral-hint">
                 <MoveHorizontal size={15} aria-hidden="true" />
-                Drag integrals left or right to change the order of integration.
               </p>
             </div>
-
-            <input
-              className="integrand-input"
-              aria-label="Integrand"
-              value={input.integrand}
-              onChange={(event) => setInput({ ...input, integrand: event.target.value })}
-              spellCheck={false}
-            />
-
-            <div className="differentials" aria-label={`Order ${input.selectedOrder}`}>
-              {innerToOuter.map((variable) => (
-                <span key={variable} ref={(element) => registerDifferential(variable, element)}>
-                  d{variable}
-                </span>
-              ))}
-            </div>
           </div>
+
+          <SymbolKeyboard onInsert={insertExpressionSnippet} />
 
           <div className="slice-controls" aria-label="Cross-section controls">
             <label className="slider-control">
@@ -314,10 +468,6 @@ export function App() {
 
         <section className="visual-column">
           <div className={`visual-share-panel${shareState === 'copied' ? ' copied' : ''}`}>
-            <div className="visual-share-copy" id="share-link-note">
-              <Bookmark size={15} aria-hidden="true" />
-              <span>{shareState === 'copied' ? 'Link copied. Bookmark it or send it to anyone.' : 'Share this setup, or bookmark the link to save it for later.'}</span>
-            </div>
             <button
               id="share-equation-button"
               className={`share-button${shareState === 'copied' ? ' copied' : ''}`}
@@ -337,6 +487,10 @@ export function App() {
                   Copy Link
                 </>
               )}
+              <div className="visual-share-copy" id="share-link-note" role="tooltip">
+                <Bookmark size={15} aria-hidden="true" />
+                <span>{shareState === 'copied' ? 'Link copied. Bookmark it or send it to anyone.' : 'Share this setup, or bookmark the link to save it for later.'}</span>
+              </div>
             </button>
           </div>
           <ThreeRegionView
@@ -354,16 +508,32 @@ export function App() {
         <aside className="right-rail">
           <section className="answer-panel" aria-label={exact ? 'Exact answer' : 'Estimated answer'}>
             <div className="answer-heading">
-              <Calculator size={18} />
-              <h2>{exact ? 'Exact Answer' : 'Estimate'}</h2>
+              <div className="answer-heading-title">
+                <Calculator size={18} />
+                <h2>{exact ? 'Exact Answer' : 'Estimate'}</h2>
+              </div>
+              <button
+                className="visibility-toggle"
+                type="button"
+                onClick={() => setIsResultVisible(!isResultVisible)}
+                aria-label={isResultVisible ? 'Hide answer' : 'Show answer'}
+                title={isResultVisible ? 'Hide answer' : 'Show answer'}
+              >
+                {isResultVisible ? <Eye size={16} /> : <EyeOff size={16} />}
+              </button>
             </div>
-            <div className="answer-value">{exact ? exact.fraction : sample.integralEstimate.toFixed(5)}</div>
-            <div className="answer-details">
-              {exact ? <span>Decimal {exact.decimal.toFixed(5)}</span> : null}
-              <span>Volume {sample.estimatedVolume.toFixed(5)}</span>
-              <span>Jacobian {sample.jacobianLabel}</span>
-              <span>{COORDINATE_LABELS[input.coordinateSystem]}</span>
+            <div className={`answer-value${!isResultVisible ? ' hidden-value' : ''}`}>
+              {isResultVisible ? (exact ? exact.fraction : sample.integralEstimate.toFixed(5)) : '•••••'}
             </div>
+            {exact && (
+              <div className="answer-details">
+                <div className="answer-detail-row">
+                  <span className={!isResultVisible ? 'hidden-value' : ''}>
+                    {isResultVisible ? exact.decimal.toFixed(5) : '•••••'}
+                  </span>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="preset-panel" aria-label="Example regions">
@@ -442,10 +612,10 @@ interface IntegralBlockProps {
   isDropTarget: boolean;
   onLowerChange: (value: string) => void;
   onUpperChange: (value: string) => void;
-  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
-  onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
-  onPointerUp: (event: PointerEvent<HTMLDivElement>) => void;
-  onPointerCancel: () => void;
+  onLowerFocus: () => void;
+  onUpperFocus: () => void;
+  registerLowerInput: (element: HTMLInputElement | null) => void;
+  registerUpperInput: (element: HTMLInputElement | null) => void;
 }
 
 function IntegralBlock({
@@ -457,10 +627,10 @@ function IntegralBlock({
   isDropTarget,
   onLowerChange,
   onUpperChange,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onPointerCancel,
+  onLowerFocus,
+  onUpperFocus,
+  registerLowerInput,
+  registerUpperInput,
 }: IntegralBlockProps) {
   return (
     <div
@@ -470,33 +640,134 @@ function IntegralBlock({
       role="group"
       aria-label={`${variable} integral`}
     >
-      <input
+      <MathField
         className="bound-input upper"
-        aria-label={`${variable} upper bound`}
+        placeholder="Upper bound"
         value={upper}
-        onChange={(event) => onUpperChange(event.target.value)}
-        spellCheck={false}
+        onChange={onUpperChange}
+        onFocus={onUpperFocus}
       />
-      <div
-        className="integral-mark"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-      >
-        <GripVertical aria-hidden="true" size={18} />
+      <div className="integral-mark">
         <span className="integral-symbol">∫</span>
       </div>
-      <input
+      <MathField
         className="bound-input lower"
-        aria-label={`${variable} lower bound`}
+        placeholder="Lower bound"
         value={lower}
-        onChange={(event) => onLowerChange(event.target.value)}
-        spellCheck={false}
+        onChange={onLowerChange}
+        onFocus={onLowerFocus}
       />
       <span className="variable-tag">d{variable}</span>
     </div>
   );
+}
+
+interface DifferentialTokenProps {
+  variable: Variable;
+  registerElement: (element: HTMLButtonElement | null) => void;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: () => void;
+}
+
+function DifferentialToken({
+  variable,
+  registerElement,
+  isDragging,
+  isDropTarget,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: DifferentialTokenProps) {
+  return (
+    <button
+      ref={registerElement}
+      className={`differential-token${isDragging ? ' dragging' : ''}${isDropTarget ? ' drop-target' : ''}`}
+      type="button"
+      data-differential-variable={variable}
+      aria-label={`Move d${variable} differential`}
+      title={`Move d${variable}`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
+      <GripVertical aria-hidden="true" size={15} />
+      <span>d{variable}</span>
+    </button>
+  );
+}
+
+function SymbolKeyboard({ onInsert }: { onInsert: (snippet: string, caretOffset?: number) => void }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <section className="symbol-keyboard" aria-label="Math symbol keyboard">
+      <div className="symbol-keyboard-heading">
+        <div>
+          <h2>
+            <Keyboard size={17} aria-hidden="true" />
+            Symbol Keyboard
+          </h2>
+          <p>Tip: you can also type aliases like rho, pi, sqrt(), sin(), cos(), theta, and phi.</p>
+        </div>
+        <button
+          className="symbol-keyboard-toggle"
+          type="button"
+          aria-expanded={isExpanded}
+          aria-controls="symbol-keyboard-groups"
+          aria-label={isExpanded ? 'Collapse symbol keyboard' : 'Expand symbol keyboard'}
+          title={isExpanded ? 'Collapse symbol keyboard' : 'Expand symbol keyboard'}
+          onClick={() => setIsExpanded((current) => !current)}
+        >
+          {isExpanded ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}
+        </button>
+      </div>
+      {isExpanded ? (
+        <div className="symbol-keyboard-groups" id="symbol-keyboard-groups">
+          {SYMBOL_KEYBOARD_GROUPS.map((group) => (
+            <div className="symbol-keyboard-group" key={group.label}>
+              <span>{group.label}</span>
+              <div className="symbol-keyboard-row">
+                {group.keys.map((key) => (
+                  <button
+                    key={`${group.label}-${key.label}-${key.insert}`}
+                    className="symbol-key"
+                    type="button"
+                    title={key.title}
+                    aria-label={`Insert ${key.title}`}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onInsert(key.insert, key.caretOffset)}
+                  >
+                    {key.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function expressionTargetKey(target: ExpressionTarget): string {
+  if (target.kind === 'integrand') return 'integrand';
+  return `bound:${target.variable}:${target.side}`;
+}
+
+function usableExpressionTarget(target: ExpressionTarget, input: IntegralInput): ExpressionTarget {
+  if (target.kind === 'integrand') return target;
+  return input.bounds[target.variable] ? target : { kind: 'integrand' };
+}
+
+function expressionValue(target: ExpressionTarget, input: IntegralInput): string {
+  if (target.kind === 'integrand') return input.integrand;
+  return input.bounds[target.variable]?.[target.side] ?? input.integrand;
 }
 
 function measureElements<T extends Element>(elements: Partial<Record<Variable, T>>, variables: Variable[]): ElementRects {
@@ -546,7 +817,7 @@ function defaultInputForCoordinateSystem(coordinateSystem: CoordinateSystem): In
   const selectedOrder = orderFromOuterToInner(defaultOuterToInner(coordinateSystem, variables));
   if (coordinateSystem === 'cylindrical') {
     return {
-      integrand: '1',
+      integrand: variables[0],
       coordinateSystem,
       variables,
       selectedOrder,
@@ -559,7 +830,7 @@ function defaultInputForCoordinateSystem(coordinateSystem: CoordinateSystem): In
   }
   if (coordinateSystem === 'spherical') {
     return {
-      integrand: '1',
+      integrand: `${variables[0]}^2 * sin(${variables[2]})`,
       coordinateSystem,
       variables,
       selectedOrder,
