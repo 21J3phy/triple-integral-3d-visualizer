@@ -10,8 +10,8 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     id: 'box',
-    name: 'Unit box',
-    description: 'A quick sanity check with volume 1.',
+    name: 'Unit cube',
+    description: 'The cube 0 <= x, y, z <= 1, with volume 1.',
     input: {
       integrand: '1',
       coordinateSystem: 'cartesian',
@@ -26,7 +26,7 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'tetrahedron',
-    name: 'Tetrahedron',
+    name: 'First-octant tetrahedron',
     description: 'x + y + z <= 1 in the first octant.',
     input: {
       integrand: '1',
@@ -42,8 +42,8 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'cylinder',
-    name: 'Cylinder-like',
-    description: 'Circular base with a constant height.',
+    name: 'Circular cylinder',
+    description: 'A radius-1 circular base with height 2.',
     input: {
       integrand: '1',
       coordinateSystem: 'cartesian',
@@ -74,8 +74,8 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'cylindrical-unit',
-    name: 'Cylindrical',
-    description: 'Unit cylinder in cylindrical coordinates.',
+    name: 'Unit cylinder',
+    description: 'A radius-1, height-1 cylinder in cylindrical coordinates.',
     input: {
       integrand: '1',
       coordinateSystem: 'cylindrical',
@@ -90,8 +90,8 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'spherical-unit',
-    name: 'Spherical',
-    description: 'Unit ball in spherical coordinates.',
+    name: 'Unit ball',
+    description: 'A radius-1 ball in spherical coordinates.',
     input: {
       integrand: '1',
       coordinateSystem: 'spherical',

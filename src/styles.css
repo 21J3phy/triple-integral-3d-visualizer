@@ -15,6 +15,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -28,6 +29,7 @@ button {
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 18px;
   overflow-x: hidden;
 }
@@ -68,6 +70,7 @@ button {
 
 .history-toggle-button,
 .new-integral-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -146,6 +149,7 @@ button {
   gap: 14px;
   width: min(420px, calc(100vw - 24px));
   height: 100vh;
+  height: 100dvh;
   border-left: 1px solid rgba(190, 203, 216, 0.86);
   background: rgba(255, 255, 255, 0.97);
   padding: 18px;
@@ -1355,9 +1359,10 @@ h1 {
 
 .answer-value {
   color: #101825;
-  font-size: 1.45rem;
+  font-size: clamp(1.15rem, 4vw, 1.45rem);
   font-weight: 850;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
   transition: opacity 160ms ease;
 }
 
@@ -1547,6 +1552,10 @@ h1 {
     padding: 12px;
   }
 
+  .workspace {
+    gap: 12px;
+  }
+
   .topbar-brand {
     gap: 9px;
   }
@@ -1584,7 +1593,17 @@ h1 {
 
   .history-sidebar {
     width: min(100vw, 420px);
-    padding: 14px;
+    padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) 14px;
+  }
+
+  .shared-banner {
+    align-items: flex-start;
+    padding: 9px 10px;
+  }
+
+  .shared-banner-content {
+    align-items: flex-start;
+    font-size: 0.78rem;
   }
 
   .answer-details {
@@ -1604,12 +1623,21 @@ h1 {
     flex-direction: column;
   }
 
+  .coordinate-control {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
   .new-integral-button {
     align-self: stretch;
   }
 
   .coordinate-card-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(132px, 1fr));
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
   }
 
   .coordinate-system-card {
@@ -1619,6 +1647,7 @@ h1 {
 
   .integral-equation {
     gap: 11px;
+    align-items: flex-end;
   }
 
   .integral-stack {
@@ -1688,7 +1717,7 @@ h1 {
 
   .visual-column,
   .viewer-wrap {
-    min-height: 430px;
+    min-height: clamp(330px, 58vh, 430px);
   }
 
   .visual-share-panel {
@@ -1699,6 +1728,298 @@ h1 {
   .visual-share-copy {
     font-size: 0.78rem;
     right: 0;
+  }
+
+}
+
+@media (max-width: 540px) {
+  .app-shell {
+    padding: 10px;
+  }
+
+  .topbar {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .topbar-brand {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .topbar-logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  h1 {
+    font-size: clamp(1.08rem, 6vw, 1.32rem);
+    line-height: 1.08;
+  }
+
+  .history-toggle-button {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 8px;
+  }
+
+  .history-toggle-button > span:not(.history-count) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .history-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 0.64rem;
+  }
+
+  .equation-panel {
+    gap: 11px;
+    padding: 11px;
+  }
+
+  .workspace-status {
+    max-width: 100%;
+    font-size: 0.72rem;
+  }
+
+  .coordinate-controls {
+    gap: 10px;
+    padding-bottom: 10px;
+  }
+
+  .coordinate-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    margin-inline: -2px;
+    padding-inline: 2px;
+    overflow-x: visible;
+  }
+
+  .coordinate-system-card {
+    gap: 6px;
+    align-content: center;
+    min-height: 64px;
+    padding: 9px;
+    text-align: center;
+  }
+
+  .coordinate-card-heading {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+  }
+
+  .coordinate-card-name {
+    font-size: 0.78rem;
+  }
+
+  .coordinate-card-state {
+    justify-self: center;
+    min-height: 20px;
+    padding: 2px 7px;
+    font-size: 0.62rem;
+  }
+
+  .coordinate-card-details {
+    display: none;
+  }
+
+  .coordinate-mode-summary {
+    font-size: 0.7rem;
+  }
+
+  .new-integral-button {
+    min-height: 36px;
+  }
+
+  .integral-equation {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 2px 0 6px;
+    overflow-x: visible;
+  }
+
+  .integral-order-control,
+  .differential-order-control {
+    justify-self: center;
+  }
+
+  .integral-stack {
+    justify-content: center;
+    min-height: 148px;
+  }
+
+  .integrand-field {
+    width: 100%;
+  }
+
+  .integrand-field .math-field-container {
+    min-width: 0;
+  }
+
+  .differential-order-control .integral-hint {
+    display: none;
+  }
+
+  .symbol-keyboard-heading {
+    align-items: center;
+  }
+
+  .symbol-keyboard-heading p {
+    display: none;
+  }
+
+  .symbol-keyboard-toggle {
+    width: 34px;
+    height: 34px;
+  }
+
+  .slice-controls {
+    gap: 10px;
+  }
+
+  .visual-column,
+  .viewer-wrap {
+    min-height: clamp(300px, 54vh, 380px);
+  }
+
+  .visual-share-panel {
+    top: 8px;
+    right: 8px;
+  }
+
+  .visual-share-copy {
+    top: calc(100% + 8px);
+    bottom: auto;
+    max-width: min(280px, calc(100vw - 36px));
+  }
+
+  .right-rail {
+    gap: 12px;
+  }
+
+  .answer-panel,
+  .preset-panel {
+    padding: 12px;
+  }
+
+  .preset-grid {
+    gap: 10px;
+  }
+
+  .preset-card {
+    gap: 8px;
+    padding: 8px;
+  }
+}
+
+@media (max-width: 380px) {
+  .app-shell {
+    padding: 8px;
+  }
+
+  .topbar-logo {
+    width: 36px;
+    height: 36px;
+  }
+
+  .eyebrow {
+    font-size: 0.62rem;
+  }
+
+  h1 {
+    font-size: 1.02rem;
+  }
+
+  .coordinate-system-card {
+    padding: 8px 6px;
+  }
+
+  .coordinate-card-name {
+    font-size: 0.68rem;
+  }
+
+  .coordinate-card-state {
+    justify-self: center;
+    min-height: 18px;
+    padding: 2px 5px;
+    font-size: 0.56rem;
+  }
+
+  .integral-stack {
+    gap: 4px;
+    min-height: 138px;
+  }
+
+  .integral-block {
+    grid-template-rows: 30px 60px 30px 18px;
+    flex-basis: 70px;
+    width: 70px;
+  }
+
+  .bound-input.math-field-container {
+    width: 64px;
+    max-width: 64px;
+    height: 30px;
+  }
+
+  .bound-input.math-field-container .math-field-visual,
+  .bound-input.math-field-container .math-field-input {
+    font-size: 0.82rem;
+    min-height: 30px;
+    padding: 4px 5px;
+  }
+
+  .integral-mark {
+    height: 60px;
+  }
+
+  .integral-symbol {
+    font-size: 3.7rem;
+  }
+
+  .variable-tag,
+  .differential-token span {
+    font-size: 0.96rem;
+  }
+
+  .math-field-input,
+  .math-field-visual {
+    font-size: 1.08rem;
+    padding: 9px 10px;
+  }
+
+  .symbol-key {
+    min-width: 36px;
+    height: 34px;
+    padding: 0 8px;
+  }
+
+  .visual-column,
+  .viewer-wrap {
+    min-height: 290px;
   }
 
 }

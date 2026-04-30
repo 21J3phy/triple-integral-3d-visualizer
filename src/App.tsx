@@ -83,7 +83,7 @@ export function App() {
   const [dropVariable, setDropVariable] = useState<Variable | null>(null);
   const [savedEquations, setSavedEquations] = useState<SavedEquation[]>(loadSavedEquations);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [workspaceLabel, setWorkspaceLabel] = useState(SHARED_INPUT ? 'Shared equation' : 'Current equation');
+  const [workspaceLabel, setWorkspaceLabel] = useState(SHARED_INPUT ? 'Shared integral' : 'Working integral');
   const [{ sliceCount, selectedSlice }, setSliceSettings] = useState(INITIAL_SLICE_SETTINGS);
   const [isResultVisible, setIsResultVisible] = useState(true);
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
@@ -160,7 +160,7 @@ export function App() {
       [input.coordinateSystem]: cloneInput(input),
     }));
     setInput(cloneInput(coordinateDrafts[coordinateSystem]));
-    setWorkspaceLabel(`${COORDINATE_LABELS[coordinateSystem]} workspace`);
+    setWorkspaceLabel(`${COORDINATE_LABELS[coordinateSystem]} integral`);
     setShareState('idle');
   };
   const createNewIntegral = () => {
@@ -171,13 +171,13 @@ export function App() {
     setSliceSettings(INITIAL_SLICE_SETTINGS);
     setIsResultVisible(true);
     setShareState('idle');
-    setWorkspaceLabel('New default workspace');
+    setWorkspaceLabel('New integral');
     setIsHistoryOpen(false);
   };
   const restoreSavedEquation = (entry: SavedEquation) => {
     rememberInput(input);
     setInput(cloneInput(entry.input));
-    setWorkspaceLabel('Restored from history');
+    setWorkspaceLabel('Restored saved integral');
     setIsHistoryOpen(false);
   };
   const removeSavedEquation = (entryId: string) => {
@@ -307,7 +307,7 @@ export function App() {
         <div className="topbar-actions">
           <button className="history-toggle-button" type="button" onClick={() => setIsHistoryOpen(true)}>
             <History size={16} aria-hidden="true" />
-            <span>History</span>
+            <span>Saved Integrals</span>
             {savedEquations.length > 0 ? <span className="history-count">{savedEquations.length}</span> : null}
           </button>
         </div>
@@ -315,20 +315,20 @@ export function App() {
 
       {isHistoryOpen ? (
         <>
-          <button className="history-backdrop" type="button" aria-label="Close history" onClick={() => setIsHistoryOpen(false)} />
-          <aside className="history-sidebar" aria-label="Saved equations">
+          <button className="history-backdrop" type="button" aria-label="Close saved integrals" onClick={() => setIsHistoryOpen(false)} />
+          <aside className="history-sidebar" aria-label="Saved integrals">
             <div className="history-sidebar-heading">
               <div>
                 <p className="eyebrow">Saved</p>
-                <h2>Equation History</h2>
+                <h2>Saved Integrals</h2>
               </div>
-              <button className="history-close-button" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history">
+              <button className="history-close-button" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close saved integrals">
                 <X size={17} aria-hidden="true" />
               </button>
             </div>
             <div className="history-list">
               {savedEquations.length === 0 ? (
-                <p className="history-empty">No saved equations yet.</p>
+                <p className="history-empty">No saved integrals yet.</p>
               ) : (
                 savedEquations.map((entry) => (
                   <div className="history-item" key={entry.id}>
@@ -344,8 +344,8 @@ export function App() {
                       className="history-delete-button"
                       type="button"
                       onClick={() => removeSavedEquation(entry.id)}
-                      aria-label="Delete saved equation"
-                      title="Delete saved equation"
+                      aria-label="Delete saved integral"
+                      title="Delete saved integral"
                     >
                       <Trash2 size={15} aria-hidden="true" />
                     </button>
@@ -366,7 +366,7 @@ export function App() {
           </div>
           <div className="coordinate-controls">
             <div className="coordinate-control">
-              <div className="coordinate-card-grid" role="group" aria-label="Coordinate system actions" aria-describedby="coordinate-mode-summary">
+              <div className="coordinate-card-grid" role="group" aria-label="Coordinate system" aria-describedby="coordinate-mode-summary">
                 {COORDINATE_SYSTEMS.map((coordinateSystem) => {
                   const isActive = coordinateSystem === input.coordinateSystem;
                   const label = COORDINATE_LABELS[coordinateSystem];
@@ -385,17 +385,17 @@ export function App() {
                           {isActive ? (
                             <>
                               <Check size={14} aria-hidden="true" />
-                              Current
+                              Selected
                             </>
-                          ) : 'Open'}
+                          ) : 'Use'}
                         </span>
                       </span>
                       <span className="coordinate-card-details">
                         <span>
-                          Variables <strong>{metadata.variables}</strong>
+                          Coordinates <strong>{metadata.variables}</strong>
                         </span>
                         <span>
-                          Jacobian <strong>{metadata.jacobian}</strong>
+                          Volume factor <strong>{metadata.jacobian}</strong>
                         </span>
                       </span>
                     </button>
@@ -403,12 +403,12 @@ export function App() {
                 })}
               </div>
               <p className="coordinate-mode-summary" id="coordinate-mode-summary">
-                Using {COORDINATE_LABELS[input.coordinateSystem].toLowerCase()} coordinates: {activeCoordinateMeta.variables} with Jacobian {activeCoordinateMeta.jacobian}.
+                {COORDINATE_LABELS[input.coordinateSystem]} coordinates use {activeCoordinateMeta.variables}; volume factor {activeCoordinateMeta.jacobian}.
               </p>
             </div>
             <button className="new-integral-button" type="button" onClick={createNewIntegral}>
               <FilePlus2 size={16} aria-hidden="true" />
-              <span>New</span>
+              <span>New Integral</span>
             </button>
           </div>
 
@@ -436,10 +436,10 @@ export function App() {
             </div>
 
             <label className="expression-field integrand-field">
-              <span>Integrand</span>
+              <span>Function to integrate</span>
               <MathField
                 className="integrand-input"
-                placeholder="Integrand"
+                placeholder="f(x, y, z)"
                 value={input.integrand}
                 onChange={(value) => setInput({ ...input, integrand: value })}
                 onFocus={() => selectExpressionTarget({ kind: 'integrand' })}
@@ -480,10 +480,10 @@ export function App() {
           <div className="slice-controls" aria-label="Cross-section controls">
             <label className="slider-control">
               <span>
-                Slices <strong>{sliceCount}</strong>
+                Cross-section count <strong>{sliceCount}</strong>
               </span>
               <input
-                aria-label="Slice count"
+                aria-label="Number of cross-sections"
                 type="range"
                 min="1"
                 max={MAX_SLICE_COUNT}
@@ -495,10 +495,10 @@ export function App() {
             </label>
             <label className="slider-control">
               <span>
-                Shown slices <strong>{selectedSlice}/{sliceCount}</strong>
+                Cross-sections shown <strong>{selectedSlice}/{sliceCount}</strong>
               </span>
               <input
-                aria-label="Shown slices"
+                aria-label="Visible cross-sections"
                 type="range"
                 min="1"
                 max={sliceCount}
@@ -531,23 +531,23 @@ export function App() {
               className={`share-button${shareState === 'copied' ? ' copied' : ''}`}
               type="button"
               onClick={handleShare}
-              aria-label="Copy shareable equation link"
+              aria-label="Copy shareable integral link"
               aria-describedby="share-link-note"
             >
               {shareState === 'copied' ? (
                 <>
                   <Check size={16} aria-hidden="true" />
-                  Link Copied
+                  Link copied
                 </>
               ) : (
                 <>
                   <Share2 size={16} aria-hidden="true" />
-                  Copy Link
+                  Share Integral
                 </>
               )}
               <div className="visual-share-copy" id="share-link-note" role="tooltip">
                 <Bookmark size={15} aria-hidden="true" />
-                <span>{shareState === 'copied' ? 'Link copied. Bookmark it or send it to anyone.' : 'Share this setup, or bookmark the link to save it for later.'}</span>
+                <span>{shareState === 'copied' ? 'Link copied. Bookmark it or send it to anyone.' : 'Share this integral, or bookmark the link to save it for later.'}</span>
               </div>
             </button>
           </div>
@@ -564,11 +564,11 @@ export function App() {
         </section>
 
         <aside className="right-rail">
-          <section className="answer-panel" aria-label={exact ? 'Exact answer' : 'Estimated answer'}>
+          <section className="answer-panel" aria-label={exact ? 'Exact integral value' : 'Estimated integral value'}>
             <div className="answer-heading">
               <div className="answer-heading-title">
                 <Calculator size={18} />
-                <h2>{exact ? 'Exact Answer' : 'Estimate'}</h2>
+                <h2>{exact ? 'Exact Value' : 'Estimated Value'}</h2>
               </div>
               <button
                 className="visibility-toggle"
@@ -594,9 +594,9 @@ export function App() {
             )}
           </section>
 
-          <section className="preset-panel" aria-label="Example regions">
+          <section className="preset-panel" aria-label="Example integrals">
             <div className="preset-heading">
-              <h2>Examples</h2>
+              <h2>Example Integrals</h2>
             </div>
             <div className="preset-grid">
               {PRESETS.map((preset) => (
@@ -647,7 +647,7 @@ function SharedBanner() {
     <div className="shared-banner" role="status" aria-live="polite">
       <div className="shared-banner-content">
         <Link size={15} aria-hidden="true" />
-        <span>You&apos;re viewing a shared equation. Feel free to edit — your changes won&apos;t affect the original link.</span>
+        <span>You&apos;re viewing a shared integral. Feel free to edit — your changes won&apos;t affect the original link.</span>
       </div>
       <button
         className="shared-banner-close"
@@ -749,8 +749,8 @@ function DifferentialToken({
       className={`differential-token${isDragging ? ' dragging' : ''}${isDropTarget ? ' drop-target' : ''}`}
       type="button"
       data-differential-variable={variable}
-      aria-label={`Move d${variable} differential`}
-      title={`Move d${variable}`}
+      aria-label={`Move d${variable} in the integration order`}
+      title={`Move d${variable} in the order`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -771,9 +771,9 @@ function SymbolKeyboard({ onInsert }: { onInsert: (snippet: string, caretOffset?
         <div>
           <h2>
             <Keyboard size={17} aria-hidden="true" />
-            Symbol Keyboard
+            Math Shortcuts
           </h2>
-          <p>Tip: you can also type aliases like rho, pi, sqrt(), sin(), cos(), theta, and phi.</p>
+          <p>Type aliases like rho, theta, phi, pi, sqrt(), sin(), and cos().</p>
         </div>
         <button
           className="symbol-keyboard-toggle"
