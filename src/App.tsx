@@ -31,6 +31,7 @@ const COORDINATE_METADATA: Record<CoordinateSystem, { variables: string; jacobia
 const STARTER_DRAFTS = createCoordinateDrafts(STARTER);
 const HISTORY_STORAGE_KEY = 'triple-integral-history-v1';
 const MAX_SAVED_EQUATIONS = 24;
+const LOGO_URL = `${import.meta.env.BASE_URL}logo.png`;
 type ElementRects = Partial<Record<Variable, DOMRect>>;
 type BoundSide = 'lower' | 'upper';
 type ExpressionTarget = { kind: 'integrand' } | { kind: 'bound'; variable: Variable; side: BoundSide };
@@ -298,7 +299,7 @@ export function App() {
       {isShared && <SharedBanner />}
       <section className="topbar">
         <div className="topbar-brand">
-          <img src="/logo.png" alt="Triple Integral Visualizer logo" className="topbar-logo" />
+          <img src={LOGO_URL} alt="Triple Integral Visualizer logo" className="topbar-logo" />
           <div>
             <p className="eyebrow">Multivariable calculus</p>
             <h1>Triple Integral Visualizer</h1>
