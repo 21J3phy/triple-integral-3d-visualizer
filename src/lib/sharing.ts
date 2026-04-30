@@ -1,4 +1,6 @@
 import type { IntegralInput } from '../types';
+import { defaultJacobianExpression } from './coordinates';
+import { normalizeExpressionAliases } from './expressionAliases';
 
 /**
  * Encode an IntegralInput into a compact URL-safe base64 string.
@@ -37,7 +39,26 @@ export function decodeEquation(encoded: string): IntegralInput | null {
 }
 
 export function withJacobianDefault(input: IntegralInput): IntegralInput {
+  if (input.jacobian != null || input.showJacobian != null) return input;
+
+  const jacobian = defaultJacobianExpression(input.coordinateSystem, input.variables);
+  if (canonicalExpression(jacobian, input) === '1') return input;
+
+  if (canonicalExpression(input.integrand, input).includes(canonicalExpression(jacobian, input))) {
+    return {
+      ...input,
+      jacobian: '1',
+      showJacobian: false,
+    };
+  }
+
   return input;
+}
+
+function canonicalExpression(expression: string, input: IntegralInput): string {
+  return normalizeExpressionAliases(expression, input.coordinateSystem, input.variables)
+    .replace(/\s+/g, '')
+    .replace(/\*/g, '');
 }
 
 /**

@@ -119,23 +119,16 @@ export function fromCartesian(system: CoordinateSystem, variables: [Variable, Va
   };
 }
 
-export function convertIntegralToCoordinateSystem(input: IntegralInput, targetSystem: CoordinateSystem): IntegralInput {
+export function convertIntegralToCoordinateSystem(input: IntegralInput, targetSystem: CoordinateSystem): IntegralInput | null {
   if (input.coordinateSystem === targetSystem) return input;
 
   const targetVariables = DEFAULT_VARIABLES[targetSystem];
   const transformedIntegrand = transformExpression(input.integrand, input.coordinateSystem, input.variables, targetSystem, targetVariables);
   const converted = convertBounds(input, targetSystem, targetVariables);
-
-  const jacobian = defaultJacobianExpression(targetSystem, targetVariables);
-  const trimmedIntegrand = transformedIntegrand.trim();
-  const integrandWithJacobian = jacobian === '1'
-    ? transformedIntegrand
-    : (!trimmedIntegrand || trimmedIntegrand === '1')
-      ? jacobian
-      : `(${transformedIntegrand}) * ${jacobian}`;
+  if (!converted) return null;
 
   return {
-    integrand: integrandWithJacobian,
+    integrand: transformedIntegrand,
     coordinateSystem: targetSystem,
     variables: targetVariables,
     selectedOrder: converted.selectedOrder,
@@ -147,7 +140,7 @@ function convertBounds(
   input: IntegralInput,
   targetSystem: CoordinateSystem,
   targetVariables: [Variable, Variable, Variable],
-): Pick<IntegralInput, 'selectedOrder' | 'bounds'> {
+): Pick<IntegralInput, 'selectedOrder' | 'bounds'> | null {
   if (input.coordinateSystem === 'cartesian' && targetSystem === 'spherical') {
     const converted = cartesianToSphericalBounds(input, targetVariables);
     if (converted) return converted;
@@ -168,7 +161,7 @@ function convertBounds(
     if (converted) return converted;
   }
 
-  return defaultBoundsForCoordinateSystem(targetSystem, targetVariables);
+  return null;
 }
 
 function cartesianToSphericalBounds(

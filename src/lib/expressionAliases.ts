@@ -60,7 +60,65 @@ export function normalizeExpressionAliases(
   coordinateSystem: CoordinateSystem,
   variables: [Variable, Variable, Variable],
 ): string {
-  return replaceSymbols(replaceConstants(expression), coordinateVariableAliases(coordinateSystem, variables));
+  return replaceSymbols(replaceConstants(normalizeSquareRootShorthand(expression)), coordinateVariableAliases(coordinateSystem, variables));
+}
+
+function normalizeSquareRootShorthand(expression: string): string {
+  let normalized = '';
+  let i = 0;
+
+  while (i < expression.length) {
+    if (expression[i] !== '√') {
+      normalized += expression[i];
+      i++;
+      continue;
+    }
+
+    i++;
+    const radicand = readRadicand(expression, i);
+    if (!radicand) {
+      normalized += 'sqrt';
+      continue;
+    }
+
+    normalized += `sqrt(${radicand.value})`;
+    i = radicand.end;
+  }
+
+  return normalized;
+}
+
+function readRadicand(expression: string, start: number): { value: string; end: number } | null {
+  if (start >= expression.length) return null;
+
+  let i = start;
+  let depth = 0;
+
+  if (expression[i] === '(') {
+    depth = 1;
+    i++;
+    while (i < expression.length && depth > 0) {
+      if (expression[i] === '(') depth++;
+      else if (expression[i] === ')') depth--;
+      i++;
+    }
+    return { value: expression.slice(start, i), end: i };
+  }
+
+  while (i < expression.length) {
+    const character = expression[i];
+    if (character === '(') depth++;
+    else if (character === ')') {
+      if (depth === 0) break;
+      depth--;
+    }
+
+    if (depth === 0 && /[\s+\-*\/=,;]/u.test(character)) break;
+    i++;
+  }
+
+  if (i === start) return null;
+  return { value: expression.slice(start, i), end: i };
 }
 
 function coordinateVariableAliases(

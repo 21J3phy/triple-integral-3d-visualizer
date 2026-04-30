@@ -5,6 +5,7 @@ interface MathFieldProps {
   value: string;
   onChange: (value: string) => void;
   onFocus?: () => void;
+  inputRef?: (element: HTMLInputElement | null) => void;
   className?: string;
   placeholder?: string;
 }
@@ -13,6 +14,7 @@ export const MathField: React.FC<MathFieldProps> = ({
   value,
   onChange,
   onFocus,
+  inputRef: registerInput,
   className = '',
   placeholder = '',
 }) => {
@@ -22,6 +24,11 @@ export const MathField: React.FC<MathFieldProps> = ({
   // We use a real input for typing but hide it
   // and render a pretty version on top.
   // This gives us accessibility and standard cursor behavior for free.
+
+  useEffect(() => {
+    registerInput?.(inputRef.current);
+    return () => registerInput?.(null);
+  }, [registerInput]);
   
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const replaced = autoReplaceMathSymbols(e.target.value);
@@ -44,34 +51,16 @@ export const MathField: React.FC<MathFieldProps> = ({
     const parts: React.ReactNode[] = [];
     let i = 0;
     
-    // We'll parse the string for √ sequences
-    // A sequence starts with √ and continues until we hit an operator or space,
-    // OR if there are parentheses, until the closing one.
-    // However, the user said "i shouldn't need parentheses".
-    // So we'll assume a √ block ends at the next space or operator.
+    // Match the parser's shorthand rule: √ covers the next contiguous operand,
+    // or a full parenthesized expression.
     
     while (i < value.length) {
       if (value[i] === '√') {
         parts.push(<span key={i} className="sqrt-symbol">√</span>);
         i++;
-        let start = i;
-        // Search for end of block: next space, operator (+, -, *, /) or end of string
-        // If there's an open paren right after √, we go to the matching close paren.
-        if (value[i] === '(') {
-            let depth = 1;
-            i++;
-            while (i < value.length && depth > 0) {
-                if (value[i] === '(') depth++;
-                if (value[i] === ')') depth--;
-                i++;
-            }
-            parts.push(<span key={start} className="sqrt-content">{value.slice(start, i)}</span>);
-        } else {
-            while (i < value.length && !/[ +\-*\/^]/.test(value[i])) {
-                i++;
-            }
-            parts.push(<span key={start} className="sqrt-content">{value.slice(start, i)}</span>);
-        }
+        const start = i;
+        i = readRadicandEnd(value, i);
+        parts.push(<span key={start} className="sqrt-content">{value.slice(start, i)}</span>);
       } else {
         parts.push(value[i]);
         i++;
@@ -108,3 +97,35 @@ export const MathField: React.FC<MathFieldProps> = ({
     </div>
   );
 };
+
+function readRadicandEnd(value: string, start: number): number {
+  if (start >= value.length) return start;
+
+  let i = start;
+  let depth = 0;
+
+  if (value[i] === '(') {
+    depth = 1;
+    i++;
+    while (i < value.length && depth > 0) {
+      if (value[i] === '(') depth++;
+      else if (value[i] === ')') depth--;
+      i++;
+    }
+    return i;
+  }
+
+  while (i < value.length) {
+    const character = value[i];
+    if (character === '(') depth++;
+    else if (character === ')') {
+      if (depth === 0) break;
+      depth--;
+    }
+
+    if (depth === 0 && /[\s+\-*\/=,;]/u.test(character)) break;
+    i++;
+  }
+
+  return i;
+}

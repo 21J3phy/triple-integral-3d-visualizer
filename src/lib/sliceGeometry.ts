@@ -18,6 +18,7 @@ interface SliceGeometryOptions {
 
 const DEFAULT_RESOLUTION = 34;
 const EPSILON = 1e-9;
+export const MAX_SLICE_COUNT = 20;
 
 type Scope = Partial<Record<Variable, number>>;
 
@@ -34,7 +35,7 @@ export function buildCoordinateSliceGeometries(parsed: ParsedIntegral, options: 
   const span = rangeEnd - rangeStart;
   if (!Number.isFinite(span) || span <= EPSILON) return [];
 
-  const sliceCount = Math.max(1, Math.floor(options.sliceCount));
+  const sliceCount = Math.min(MAX_SLICE_COUNT, Math.max(1, Math.floor(options.sliceCount)));
   const visibleCount = options.showAllSlices ? Math.min(Math.max(1, Math.floor(options.visibleSliceCount)), sliceCount) : 1;
 
   const geometries: CoordinateSliceGeometry[] = [];

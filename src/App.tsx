@@ -1,30 +1,40 @@
-import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { Analytics } from '@vercel/analytics/react';
-import { AlertTriangle, ArrowRightLeft, Bookmark, Calculator, Check, ChevronDown, ChevronUp, Eye, EyeOff, FilePlus2, Github, GripVertical, Keyboard, Link, Linkedin, MoveHorizontal, Share2, X } from 'lucide-react';
+import { AlertTriangle, Bookmark, Calculator, Check, ChevronDown, ChevronUp, Eye, EyeOff, FilePlus2, Github, GripVertical, History, Keyboard, Link, Linkedin, MoveHorizontal, Share2, Trash2, X } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
-import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
-import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
+import { rewriteBoundsForOrder } from './lib/bounds';
+import { COORDINATE_LABELS } from './lib/coordinates';
 import { parseIntegral, sampleRegion, solveIntegralExactly } from './lib/integral';
-import { orderFromOuterToInner, orderToOuterInner } from './lib/orders';
+import { orderToOuterInner } from './lib/orders';
 import { PRESETS } from './lib/presets';
 import { PresetPreview } from './components/PresetPreview';
 import { buildShareUrl, copyToClipboard, getSharedEquation, withJacobianDefault } from './lib/sharing';
 import { MathField } from './components/MathField';
 import { autoReplaceMathSymbols } from './lib/mathSymbols';
+import { MAX_SLICE_COUNT } from './lib/sliceGeometry';
 import type { CoordinateSystem, IntegralInput, Variable } from './types';
 
 const SHARED_INPUT = getSharedEquation();
-const STARTER = withJacobianDefault(SHARED_INPUT ?? PRESETS[1].input);
+const DEFAULT_INPUT = withJacobianDefault(PRESETS[1].input);
+const STARTER = withJacobianDefault(SHARED_INPUT ?? DEFAULT_INPUT);
 const SAMPLE_COUNT = 8000;
 const SWAP_ANIMATION_MS = 260;
 const MIN_SLICE_COUNT = 1;
-const MAX_SLICE_COUNT = 100;
-const SLICE_COUNT_WARNING_THRESHOLD = 20;
+const INITIAL_SLICE_SETTINGS = { sliceCount: 7, selectedSlice: 7 };
 const BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/21J3phy';
 const COORDINATE_SYSTEMS = Object.keys(COORDINATE_LABELS) as CoordinateSystem[];
+const COORDINATE_METADATA: Record<CoordinateSystem, { variables: string; jacobian: string }> = {
+  cartesian: { variables: 'x, y, z', jacobian: '1' },
+  cylindrical: { variables: 'r, θ, z', jacobian: 'r' },
+  spherical: { variables: 'ρ, θ, φ', jacobian: 'ρ² sin(φ)' },
+};
+const STARTER_DRAFTS = createCoordinateDrafts(STARTER);
+const HISTORY_STORAGE_KEY = 'triple-integral-history-v1';
+const MAX_SAVED_EQUATIONS = 24;
 type ElementRects = Partial<Record<Variable, DOMRect>>;
 type BoundSide = 'lower' | 'upper';
 type ExpressionTarget = { kind: 'integrand' } | { kind: 'bound'; variable: Variable; side: BoundSide };
+type SavedEquation = { id: string; savedAt: number; input: IntegralInput };
 
 const SYMBOL_KEYBOARD_GROUPS: Array<{
   label: string;
@@ -43,7 +53,7 @@ const SYMBOL_KEYBOARD_GROUPS: Array<{
   {
     label: 'Functions',
     keys: [
-      { label: '√', insert: 'sqrt()', caretOffset: 5, title: 'sqrt()' },
+      { label: '√', insert: 'sqrt', caretOffset: 1, title: 'sqrt' },
       { label: 'sin', insert: 'sin()', caretOffset: 4, title: 'sin()' },
       { label: 'cos', insert: 'cos()', caretOffset: 4, title: 'cos()' },
       { label: 'tan', insert: 'tan()', caretOffset: 4, title: 'tan()' },
@@ -68,11 +78,13 @@ const SYMBOL_KEYBOARD_GROUPS: Array<{
 
 export function App() {
   const [input, setInput] = useState<IntegralInput>(STARTER);
-  const [variableDrafts, setVariableDrafts] = useState<[string, string, string]>(STARTER.variables);
+  const [coordinateDrafts, setCoordinateDrafts] = useState<Record<CoordinateSystem, IntegralInput>>(STARTER_DRAFTS);
   const [draggedVariable, setDraggedVariable] = useState<Variable | null>(null);
   const [dropVariable, setDropVariable] = useState<Variable | null>(null);
-  const [pendingCoordinateSystem, setPendingCoordinateSystem] = useState<CoordinateSystem | null>(null);
-  const [{ sliceCount, selectedSlice }, setSliceSettings] = useState({ sliceCount: 7, selectedSlice: 7 });
+  const [savedEquations, setSavedEquations] = useState<SavedEquation[]>(loadSavedEquations);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [workspaceLabel, setWorkspaceLabel] = useState(SHARED_INPUT ? 'Shared equation' : 'Current equation');
+  const [{ sliceCount, selectedSlice }, setSliceSettings] = useState(INITIAL_SLICE_SETTINGS);
   const [isResultVisible, setIsResultVisible] = useState(true);
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
   const [isShared] = useState(!!SHARED_INPUT);
@@ -90,12 +102,32 @@ export function App() {
   const variables = input.variables;
   const outerToInner = orderToOuterInner(input.selectedOrder);
   const innerToOuter = [...outerToInner].reverse();
-  const selectedCoordinateIndex = COORDINATE_SYSTEMS.indexOf(input.coordinateSystem);
+  const activeCoordinateMeta = COORDINATE_METADATA[input.coordinateSystem];
 
 
   useEffect(() => {
-    setVariableDrafts(input.variables);
-  }, [input.variables]);
+    saveSavedEquations(savedEquations);
+  }, [savedEquations]);
+
+  useEffect(() => {
+    setCoordinateDrafts((current) => ({
+      ...current,
+      [input.coordinateSystem]: cloneInput(input),
+    }));
+  }, [input]);
+
+  const rememberInput = useCallback((inputToSave: IntegralInput) => {
+    setSavedEquations((current) => {
+      const savedInput = cloneInput(inputToSave);
+      const fingerprint = inputFingerprint(savedInput);
+      const nextEntry: SavedEquation = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        savedAt: Date.now(),
+        input: savedInput,
+      };
+      return [nextEntry, ...current.filter((entry) => inputFingerprint(entry.input) !== fingerprint)].slice(0, MAX_SAVED_EQUATIONS);
+    });
+  }, []);
 
   const updateBound = (variable: Variable, side: 'lower' | 'upper', value: string) => {
     const nextValue = autoReplaceMathSymbols(value);
@@ -121,41 +153,35 @@ export function App() {
       selectedSlice: clampInteger(Number(value), MIN_SLICE_COUNT, current.sliceCount),
     }));
   };
-  const updateCoordinateSystem = (coordinateSystem: CoordinateSystem) => {
-    if (coordinateSystem === input.coordinateSystem) {
-      setPendingCoordinateSystem(null);
-      return;
-    }
-    setPendingCoordinateSystem(coordinateSystem);
+  const switchCoordinateSystem = (coordinateSystem: CoordinateSystem) => {
+    if (coordinateSystem === input.coordinateSystem) return;
+    setCoordinateDrafts((current) => ({
+      ...current,
+      [input.coordinateSystem]: cloneInput(input),
+    }));
+    setInput(cloneInput(coordinateDrafts[coordinateSystem]));
+    setWorkspaceLabel(`${COORDINATE_LABELS[coordinateSystem]} workspace`);
+    setShareState('idle');
   };
-  const convertToPendingCoordinateSystem = () => {
-    if (!pendingCoordinateSystem) return;
-    setInput((current) => convertIntegralToCoordinateSystem(current, pendingCoordinateSystem));
-    setPendingCoordinateSystem(null);
+  const createNewIntegral = () => {
+    rememberInput(input);
+    const defaultDrafts = createCoordinateDrafts();
+    setCoordinateDrafts(defaultDrafts);
+    setInput(cloneInput(defaultDrafts[input.coordinateSystem]));
+    setSliceSettings(INITIAL_SLICE_SETTINGS);
+    setIsResultVisible(true);
+    setShareState('idle');
+    setWorkspaceLabel('New default workspace');
+    setIsHistoryOpen(false);
   };
-  const startFreshInPendingCoordinateSystem = () => {
-    if (!pendingCoordinateSystem) return;
-    setInput(defaultInputForCoordinateSystem(pendingCoordinateSystem));
-    setPendingCoordinateSystem(null);
+  const restoreSavedEquation = (entry: SavedEquation) => {
+    rememberInput(input);
+    setInput(cloneInput(entry.input));
+    setWorkspaceLabel('Restored from history');
+    setIsHistoryOpen(false);
   };
-  const updateVariableDraft = (index: number, value: string) => {
-    const nextValue = autoReplaceMathSymbols(value);
-    const nextDrafts = variableDrafts.map((name, itemIndex) => (itemIndex === index ? nextValue : name)) as [string, string, string];
-    setVariableDrafts(nextDrafts);
-    if (areValidVariables(nextDrafts)) {
-      setInput((current) => rewriteVariables(current, nextDrafts));
-    }
-  };
-  const commitVariableDrafts = () => {
-    const nextVariables = variableDrafts.map((name) => name.trim()) as [string, string, string];
-    if (!areValidVariables(nextVariables)) {
-      setVariableDrafts(input.variables);
-      return;
-    }
-    setInput((current) => rewriteVariables(current, nextVariables));
-  };
-  const commitOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') event.currentTarget.blur();
+  const removeSavedEquation = (entryId: string) => {
+    setSavedEquations((current) => current.filter((entry) => entry.id !== entryId));
   };
   const registerExpressionInput = (target: ExpressionTarget, element: HTMLInputElement | null) => {
     const key = expressionTargetKey(target);
@@ -278,76 +304,112 @@ export function App() {
             <h1>Triple Integral Visualizer</h1>
           </div>
         </div>
+        <div className="topbar-actions">
+          <button className="history-toggle-button" type="button" onClick={() => setIsHistoryOpen(true)}>
+            <History size={16} aria-hidden="true" />
+            <span>History</span>
+            {savedEquations.length > 0 ? <span className="history-count">{savedEquations.length}</span> : null}
+          </button>
+        </div>
       </section>
+
+      {isHistoryOpen ? (
+        <>
+          <button className="history-backdrop" type="button" aria-label="Close history" onClick={() => setIsHistoryOpen(false)} />
+          <aside className="history-sidebar" aria-label="Saved equations">
+            <div className="history-sidebar-heading">
+              <div>
+                <p className="eyebrow">Saved</p>
+                <h2>Equation History</h2>
+              </div>
+              <button className="history-close-button" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history">
+                <X size={17} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="history-list">
+              {savedEquations.length === 0 ? (
+                <p className="history-empty">No saved equations yet.</p>
+              ) : (
+                savedEquations.map((entry) => (
+                  <div className="history-item" key={entry.id}>
+                    <button className="history-card" type="button" onClick={() => restoreSavedEquation(entry)}>
+                      <span className="history-card-meta">
+                        <span>{COORDINATE_LABELS[entry.input.coordinateSystem]}</span>
+                        <time dateTime={new Date(entry.savedAt).toISOString()}>{formatSavedAt(entry.savedAt)}</time>
+                      </span>
+                      <span className="history-card-integrand">{entry.input.integrand || '1'}</span>
+                      <span className="history-card-order">{entry.input.selectedOrder}</span>
+                    </button>
+                    <button
+                      className="history-delete-button"
+                      type="button"
+                      onClick={() => removeSavedEquation(entry.id)}
+                      aria-label="Delete saved equation"
+                      title="Delete saved equation"
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
+        </>
+      ) : null}
 
       <ErrorBoundary>
         <section className="workspace">
         <section className="equation-panel" aria-label="Triple integral input">
+          <div className="workspace-status" key={workspaceLabel} role="status" aria-live="polite">
+            <FilePlus2 size={15} aria-hidden="true" />
+            <span>{workspaceLabel}</span>
+          </div>
           <div className="coordinate-controls">
             <div className="coordinate-control">
-              {pendingCoordinateSystem ? (
-                <div
-                  className="coordinate-switch-choice"
-                  role="group"
-                  aria-label={`Switch to ${COORDINATE_LABELS[pendingCoordinateSystem]}`}
-                  style={{ '--pending-coordinate-index': COORDINATE_SYSTEMS.indexOf(pendingCoordinateSystem) } as CSSProperties}
-                >
-                  <div className="coordinate-switch-heading">
-                    <span>Switch to {COORDINATE_LABELS[pendingCoordinateSystem]}</span>
+              <div className="coordinate-card-grid" role="group" aria-label="Coordinate system actions" aria-describedby="coordinate-mode-summary">
+                {COORDINATE_SYSTEMS.map((coordinateSystem) => {
+                  const isActive = coordinateSystem === input.coordinateSystem;
+                  const label = COORDINATE_LABELS[coordinateSystem];
+                  const metadata = COORDINATE_METADATA[coordinateSystem];
+                  return (
                     <button
-                      className="coordinate-switch-close"
+                      key={coordinateSystem}
+                      className={`coordinate-system-card${isActive ? ' active' : ''}`}
                       type="button"
-                      onClick={() => setPendingCoordinateSystem(null)}
-                      aria-label="Cancel coordinate switch"
+                      aria-pressed={isActive}
+                      onClick={() => switchCoordinateSystem(coordinateSystem)}
                     >
-                      <X size={15} aria-hidden="true" />
+                      <span className="coordinate-card-heading">
+                        <span className="coordinate-card-name">{label}</span>
+                        <span className="coordinate-card-state">
+                          {isActive ? (
+                            <>
+                              <Check size={14} aria-hidden="true" />
+                              Current
+                            </>
+                          ) : 'Open'}
+                        </span>
+                      </span>
+                      <span className="coordinate-card-details">
+                        <span>
+                          Variables <strong>{metadata.variables}</strong>
+                        </span>
+                        <span>
+                          Jacobian <strong>{metadata.jacobian}</strong>
+                        </span>
+                      </span>
                     </button>
-                  </div>
-                  <div className="coordinate-switch-actions">
-                    <button className="coordinate-switch-action" type="button" onClick={convertToPendingCoordinateSystem}>
-                      <ArrowRightLeft size={16} aria-hidden="true" />
-                      <span>Convert Current</span>
-                    </button>
-                    <button className="coordinate-switch-action" type="button" onClick={startFreshInPendingCoordinateSystem}>
-                      <FilePlus2 size={16} aria-hidden="true" />
-                      <span>Start Fresh</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              <div
-                className="coordinate-slider"
-                role="radiogroup"
-                aria-label="Coordinate system"
-                style={{ '--coordinate-index': selectedCoordinateIndex } as CSSProperties}
-              >
-                {COORDINATE_SYSTEMS.map((coordinateSystem) => (
-                  <button
-                    key={coordinateSystem}
-                    className={`${coordinateSystem === input.coordinateSystem ? 'active' : ''}${coordinateSystem === pendingCoordinateSystem ? ' pending' : ''}`}
-                    type="button"
-                    role="radio"
-                    aria-checked={coordinateSystem === input.coordinateSystem}
-                    onClick={() => updateCoordinateSystem(coordinateSystem)}
-                  >
-                    {COORDINATE_LABELS[coordinateSystem]}
-                  </button>
-                ))}
+                  );
+                })}
               </div>
+              <p className="coordinate-mode-summary" id="coordinate-mode-summary">
+                Using {COORDINATE_LABELS[input.coordinateSystem].toLowerCase()} coordinates: {activeCoordinateMeta.variables} with Jacobian {activeCoordinateMeta.jacobian}.
+              </p>
             </div>
-            <div className="variable-name-row" aria-label="Variable names">
-              {variableDrafts.map((name, index) => (
-                <input
-                  key={`${input.coordinateSystem}-${index}`}
-                  aria-label={`Variable ${index + 1}`}
-                  value={name}
-                  onChange={(event) => updateVariableDraft(index, event.target.value)}
-                  onBlur={commitVariableDrafts}
-                  onKeyDown={commitOnEnter}
-                  spellCheck={false}
-                />
-              ))}
-            </div>
+            <button className="new-integral-button" type="button" onClick={createNewIntegral}>
+              <FilePlus2 size={16} aria-hidden="true" />
+              <span>New</span>
+            </button>
           </div>
 
           <div className="integral-equation">
@@ -381,6 +443,7 @@ export function App() {
                 value={input.integrand}
                 onChange={(value) => setInput({ ...input, integrand: value })}
                 onFocus={() => selectExpressionTarget({ kind: 'integrand' })}
+                inputRef={(element) => registerExpressionInput({ kind: 'integrand' }, element)}
               />
             </label>
 
@@ -445,11 +508,6 @@ export function App() {
                 onChange={(event) => updateSelectedSlice(event.currentTarget.value)}
               />
             </label>
-            {sliceCount > SLICE_COUNT_WARNING_THRESHOLD ? (
-              <p className="status warning slice-warning" aria-live="polite">
-                <AlertTriangle size={15} /> More than {SLICE_COUNT_WARNING_THRESHOLD} slices can get slow. Only push higher if your device has the power.
-              </p>
-            ) : null}
           </div>
 
           <div className="student-feedback" aria-live="polite">
@@ -642,20 +700,22 @@ function IntegralBlock({
     >
       <MathField
         className="bound-input upper"
-        placeholder="Upper bound"
+        placeholder="Upper"
         value={upper}
         onChange={onUpperChange}
         onFocus={onUpperFocus}
+        inputRef={registerUpperInput}
       />
       <div className="integral-mark">
         <span className="integral-symbol">∫</span>
       </div>
       <MathField
         className="bound-input lower"
-        placeholder="Lower bound"
+        placeholder="Lower"
         value={lower}
         onChange={onLowerChange}
         onFocus={onLowerFocus}
+        inputRef={registerLowerInput}
       />
       <span className="variable-tag">d{variable}</span>
     </div>
@@ -812,46 +872,79 @@ function clampInteger(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+function loadSavedEquations(): SavedEquation[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isSavedEquation).slice(0, MAX_SAVED_EQUATIONS);
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedEquations(entries: SavedEquation[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Keeping the app usable matters more than surfacing localStorage failures.
+  }
+}
+
+function isSavedEquation(value: unknown): value is SavedEquation {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Partial<SavedEquation>;
+  return typeof entry.id === 'string' && typeof entry.savedAt === 'number' && Number.isFinite(entry.savedAt) && isIntegralInput(entry.input);
+}
+
+function isIntegralInput(value: unknown): value is IntegralInput {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<IntegralInput>;
+  return (
+    typeof candidate.integrand === 'string' &&
+    typeof candidate.coordinateSystem === 'string' &&
+    COORDINATE_SYSTEMS.includes(candidate.coordinateSystem as CoordinateSystem) &&
+    Array.isArray(candidate.variables) &&
+    candidate.variables.length === 3 &&
+    candidate.variables.every((variable) => typeof variable === 'string') &&
+    typeof candidate.selectedOrder === 'string' &&
+    !!candidate.bounds &&
+    typeof candidate.bounds === 'object'
+  );
+}
+
+function cloneInput(input: IntegralInput): IntegralInput {
+  return JSON.parse(JSON.stringify(input)) as IntegralInput;
+}
+
+function createCoordinateDrafts(activeInput?: IntegralInput): Record<CoordinateSystem, IntegralInput> {
+  const drafts = Object.fromEntries(
+    COORDINATE_SYSTEMS.map((coordinateSystem) => [coordinateSystem, defaultInputForCoordinateSystem(coordinateSystem)]),
+  ) as Record<CoordinateSystem, IntegralInput>;
+  if (activeInput) drafts[activeInput.coordinateSystem] = cloneInput(activeInput);
+  return drafts;
+}
+
 function defaultInputForCoordinateSystem(coordinateSystem: CoordinateSystem): IntegralInput {
-  const variables = DEFAULT_VARIABLES[coordinateSystem];
-  const selectedOrder = orderFromOuterToInner(defaultOuterToInner(coordinateSystem, variables));
-  if (coordinateSystem === 'cylindrical') {
-    return {
-      integrand: variables[0],
-      coordinateSystem,
-      variables,
-      selectedOrder,
-      bounds: {
-        [variables[0]]: { lower: '0', upper: '1' },
-        [variables[1]]: { lower: '0', upper: '2*pi' },
-        [variables[2]]: { lower: '0', upper: '1' },
-      },
-    };
-  }
-  if (coordinateSystem === 'spherical') {
-    return {
-      integrand: `${variables[0]}^2 * sin(${variables[2]})`,
-      coordinateSystem,
-      variables,
-      selectedOrder,
-      bounds: {
-        [variables[0]]: { lower: '0', upper: '1' },
-        [variables[1]]: { lower: '0', upper: '2*pi' },
-        [variables[2]]: { lower: '0', upper: 'pi' },
-      },
-    };
-  }
-  return {
-    integrand: '1',
-    coordinateSystem,
-    variables,
-    selectedOrder,
-    bounds: {
-      [variables[0]]: { lower: '0', upper: '1' },
-      [variables[1]]: { lower: '0', upper: '1' },
-      [variables[2]]: { lower: '0', upper: '1' },
-    },
-  };
+  if (coordinateSystem === 'cartesian') return cloneInput(DEFAULT_INPUT);
+  const preset = PRESETS.find((entry) => entry.input.coordinateSystem === coordinateSystem) ?? PRESETS[0];
+  return cloneInput(withJacobianDefault(preset.input));
+}
+
+function inputFingerprint(input: IntegralInput): string {
+  return JSON.stringify(input);
+}
+
+function formatSavedAt(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
 }
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {

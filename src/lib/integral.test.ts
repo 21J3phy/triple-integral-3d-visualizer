@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rewriteBoundsForOrder } from './bounds';
-import { convertIntegralToCoordinateSystem } from './coordinates';
-import { parseIntegral, sampleRegion, estimateSwitchedBounds, solveIntegralExactly } from './integral';
+import { convertIntegralToCoordinateSystem, fromCartesian, toCartesian } from './coordinates';
+import { parseIntegral, sampleRegion, estimateSwitchedBounds, solveIntegralExactly, membership } from './integral';
 import { buildCoordinateSliceGeometries, type CoordinateSliceGeometry } from './sliceGeometry';
 import { PRESETS } from './presets';
 import { withJacobianDefault } from './sharing';
@@ -42,6 +42,47 @@ const unitSphere: IntegralInput = {
     φ: { lower: '0', upper: 'pi' },
   },
 };
+
+describe('coordinate point conversion', () => {
+  it('round-trips Cartesian points without changing axes', () => {
+    const variables: [string, string, string] = ['x', 'y', 'z'];
+    const point = { x: -2.5, y: 3.25, z: 0.5 };
+    const scope = fromCartesian('cartesian', variables, point);
+
+    expect(scope.x).toBeCloseTo(point.x);
+    expect(scope.y).toBeCloseTo(point.y);
+    expect(scope.z).toBeCloseTo(point.z);
+    expectPointClose(toCartesian('cartesian', variables, scope), point);
+  });
+
+  it('round-trips cylindrical points across positive and negative quadrants', () => {
+    const variables: [string, string, string] = ['r', 'θ', 'z'];
+    const scope = { r: 3, θ: (5 * Math.PI) / 4, z: -2 };
+    const point = toCartesian('cylindrical', variables, scope);
+    const roundTrip = fromCartesian('cylindrical', variables, point);
+
+    expect(roundTrip.r).toBeCloseTo(scope.r);
+    expectEquivalentAngle(roundTrip.θ, scope.θ);
+    expect(roundTrip.z).toBeCloseTo(scope.z);
+    expectPointClose(toCartesian('cylindrical', variables, roundTrip), point);
+  });
+
+  it('round-trips spherical points at the equator, poles, and origin', () => {
+    const variables: [string, string, string] = ['ρ', 'θ', 'φ'];
+    const equator = { ρ: 2, θ: (7 * Math.PI) / 4, φ: Math.PI / 2 };
+    const equatorPoint = toCartesian('spherical', variables, equator);
+    const equatorRoundTrip = fromCartesian('spherical', variables, equatorPoint);
+
+    expect(equatorRoundTrip.ρ).toBeCloseTo(equator.ρ);
+    expectEquivalentAngle(equatorRoundTrip.θ, equator.θ);
+    expect(equatorRoundTrip.φ).toBeCloseTo(equator.φ);
+    expectPointClose(toCartesian('spherical', variables, equatorRoundTrip), equatorPoint);
+
+    expect(fromCartesian('spherical', variables, { x: 0, y: 0, z: 3 }).φ).toBeCloseTo(0);
+    expect(fromCartesian('spherical', variables, { x: 0, y: 0, z: -3 }).φ).toBeCloseTo(Math.PI);
+    expect(fromCartesian('spherical', variables, { x: 0, y: 0, z: 0 })).toMatchObject({ ρ: 0, θ: 0, φ: 0 });
+  });
+});
 
 describe('parseIntegral', () => {
   it('accepts constants, variables, and dependent bounds', () => {
@@ -106,6 +147,19 @@ describe('parseIntegral', () => {
 
     expect(parsed.validationErrors).toEqual([]);
   });
+
+  it('accepts square root shorthand when the radicand is under the radical', () => {
+    const parsed = parseIntegral({
+      ...cube,
+      integrand: '√4 + √x² + √(1 - y²)',
+      bounds: {
+        ...cube.bounds,
+        z: { lower: '0', upper: '√1' },
+      },
+    });
+
+    expect(parsed.validationErrors).toEqual([]);
+  });
 });
 
 describe('sampleRegion', () => {
@@ -149,6 +203,28 @@ describe('sampleRegion', () => {
   it('includes the spherical Jacobian', () => {
     const sample = sampleRegion(parseIntegral(unitSphere), 12000);
     expect(sample.estimatedVolume).toBeCloseTo((4 * Math.PI) / 3, 1);
+  });
+});
+
+describe('membership', () => {
+  it('accepts negative-y points inside a full-turn cylindrical region', () => {
+    const cylinder: IntegralInput = {
+      integrand: '1',
+      coordinateSystem: 'cylindrical',
+      variables: ['r', 'θ', 'z'],
+      selectedOrder: 'dz dr dθ',
+      bounds: {
+        r: { lower: '0', upper: '2' },
+        θ: { lower: '0', upper: '2*pi' },
+        z: { lower: '-1', upper: '1' },
+      },
+    };
+
+    expect(membership(parseIntegral(cylinder), { x: 1, y: -1, z: 0 })).toBe(true);
+  });
+
+  it('accepts negative-y points inside a full-turn spherical region', () => {
+    expect(membership(parseIntegral(unitSphere), { x: 0.25, y: -0.25, z: 0.25 })).toBe(true);
   });
 });
 
@@ -375,7 +451,7 @@ describe('buildCoordinateSliceGeometries', () => {
 
 describe('convertIntegralToCoordinateSystem', () => {
   it('updates a Cartesian tetrahedron integrand and bounds when switching to spherical', () => {
-    const converted = convertIntegralToCoordinateSystem(
+    const converted = expectConverted(
       {
         ...tetrahedron,
         integrand: 'x + y + z',
@@ -395,6 +471,31 @@ describe('convertIntegralToCoordinateSystem', () => {
     expect(parseIntegral(converted).validationErrors).toEqual([]);
   });
 
+  it('converts a Cartesian ball to spherical bounds without embedding the Jacobian in the integrand', () => {
+    const converted = expectConverted(
+      {
+        integrand: 'x^2 + y^2 + z^2',
+        coordinateSystem: 'cartesian',
+        variables: ['x', 'y', 'z'],
+        selectedOrder: 'dz dy dx',
+        bounds: {
+          x: { lower: '-2', upper: '2' },
+          y: { lower: '-sqrt(2^2 - x^2)', upper: 'sqrt(2^2 - x^2)' },
+          z: { lower: '-sqrt(2^2 - x^2 - y^2)', upper: 'sqrt(2^2 - x^2 - y^2)' },
+        },
+      },
+      'spherical',
+    );
+
+    expect(converted.coordinateSystem).toBe('spherical');
+    expect(converted.bounds.ρ).toEqual({ lower: '0', upper: '2' });
+    expect(converted.bounds.θ).toEqual({ lower: '0', upper: '2*pi' });
+    expect(converted.bounds.φ).toEqual({ lower: '0', upper: 'pi' });
+    expect(converted.integrand).toContain('ρ');
+    expect(converted.integrand).not.toContain('ρ^2 sin(φ)');
+    expect(parseIntegral(converted).validationErrors).toEqual([]);
+  });
+
   it('converts a full spherical ball to Cartesian bounds and variables', () => {
     const sphere: IntegralInput = {
       integrand: 'ρ^2 + sin(φ)',
@@ -408,7 +509,7 @@ describe('convertIntegralToCoordinateSystem', () => {
       },
     };
 
-    const converted = convertIntegralToCoordinateSystem(sphere, 'cartesian');
+    const converted = expectConverted(sphere, 'cartesian');
 
     expect(converted.coordinateSystem).toBe('cartesian');
     expect(converted.variables).toEqual(['x', 'y', 'z']);
@@ -420,8 +521,32 @@ describe('convertIntegralToCoordinateSystem', () => {
     expect(parseIntegral(converted).validationErrors).toEqual([]);
   });
 
+  it('converts a full spherical ball to cylindrical bounds', () => {
+    const converted = expectConverted(unitSphere, 'cylindrical');
+
+    expect(converted.coordinateSystem).toBe('cylindrical');
+    expect(converted.variables).toEqual(['r', 'θ', 'z']);
+    expect(converted.selectedOrder).toBe('dz dr dθ');
+    expect(converted.bounds.r).toEqual({ lower: '0', upper: '1' });
+    expect(converted.bounds.θ).toEqual({ lower: '0', upper: '2*pi' });
+    expect(converted.bounds.z).toEqual({ lower: '-sqrt(1^2 - r^2)', upper: 'sqrt(1^2 - r^2)' });
+    expect(parseIntegral(converted).validationErrors).toEqual([]);
+  });
+
+  it('converts a full cylindrical region to Cartesian bounds', () => {
+    const converted = expectConverted(PRESETS[4].input, 'cartesian');
+
+    expect(converted.coordinateSystem).toBe('cartesian');
+    expect(converted.variables).toEqual(['x', 'y', 'z']);
+    expect(converted.selectedOrder).toBe('dz dy dx');
+    expect(converted.bounds.x).toEqual({ lower: '-1', upper: '1' });
+    expect(converted.bounds.y).toEqual({ lower: '-sqrt(1^2 - x^2)', upper: 'sqrt(1^2 - x^2)' });
+    expect(converted.bounds.z).toEqual({ lower: '0', upper: '1' });
+    expect(parseIntegral(converted).validationErrors).toEqual([]);
+  });
+
   it('converts spherical integrands written with typed aliases', () => {
-    const converted = convertIntegralToCoordinateSystem(
+    const converted = expectConverted(
       {
         ...unitSphere,
         integrand: 'rho^2 + sin(phi) + cos(theta)',
@@ -434,7 +559,30 @@ describe('convertIntegralToCoordinateSystem', () => {
     expect(converted.integrand).toContain('atan2');
     expect(parseIntegral(converted).validationErrors).toEqual([]);
   });
+
+  it('refuses unsupported conversions instead of substituting unit bounds', () => {
+    expect(convertIntegralToCoordinateSystem(cube, 'spherical')).toBeNull();
+  });
 });
+
+function expectConverted(input: IntegralInput, targetSystem: IntegralInput['coordinateSystem']): IntegralInput {
+  const converted = convertIntegralToCoordinateSystem(input, targetSystem);
+  expect(converted).not.toBeNull();
+  if (!converted) throw new Error(`Expected conversion to ${targetSystem} to be supported.`);
+  return converted;
+}
+
+function expectPointClose(actual: { x: number; y: number; z: number }, expected: { x: number; y: number; z: number }) {
+  expect(actual.x).toBeCloseTo(expected.x);
+  expect(actual.y).toBeCloseTo(expected.y);
+  expect(actual.z).toBeCloseTo(expected.z);
+}
+
+function expectEquivalentAngle(actual: number, expected: number) {
+  const tau = 2 * Math.PI;
+  const delta = ((((actual - expected) % tau) + tau + Math.PI) % tau) - Math.PI;
+  expect(delta).toBeCloseTo(0);
+}
 
 function expectSolidGeometry(slice: CoordinateSliceGeometry) {
   expect(slice.positions.length).toBeGreaterThan(0);

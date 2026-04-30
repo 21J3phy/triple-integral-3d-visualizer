@@ -240,7 +240,7 @@ export function membership(parsed: ParsedIntegral, point: Point3): boolean {
     if (!compiled) return false;
     const lower = evaluate(compiled.lower, scope);
     const upper = evaluate(compiled.upper, scope);
-    const value = pointScope[variable];
+    const value = normalizeCoordinateValueForBounds(parsed.input, variable, pointScope[variable], lower, upper);
     if (!finiteRange(lower, upper) || value < lower - 1e-8 || value > upper + 1e-8) return false;
     scope[variable] = value;
   }
@@ -1098,7 +1098,24 @@ function normalizeExpression(expression: string, input: IntegralInput): string {
 }
 
 function jacobianExpressionForInput(input: IntegralInput): string {
-  return '1';
+  if (input.showJacobian === false) return input.jacobian ?? '1';
+  return input.jacobian ?? defaultJacobianExpression(input.coordinateSystem, input.variables);
+}
+
+function normalizeCoordinateValueForBounds(input: IntegralInput, variable: Variable, value: number, lower: number, upper: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(lower) || !Number.isFinite(upper)) return value;
+  if ((input.coordinateSystem !== 'cylindrical' && input.coordinateSystem !== 'spherical') || variable !== input.variables[1]) return value;
+  if (!isFullTurnInterval(lower, upper)) return value;
+
+  const tau = 2 * Math.PI;
+  let normalized = value;
+  while (normalized < lower - 1e-8) normalized += tau;
+  while (normalized > upper + 1e-8) normalized -= tau;
+  return normalized;
+}
+
+function isFullTurnInterval(lower: number, upper: number): boolean {
+  return Math.abs((upper - lower) - 2 * Math.PI) < 1e-8;
 }
 
 function unknownSymbols(node: MathNode, variables: Variable[]): string[] {
