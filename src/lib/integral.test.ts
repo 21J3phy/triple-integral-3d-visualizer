@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { rewriteBoundsForOrder } from './bounds';
 import { convertIntegralToCoordinateSystem } from './coordinates';
-import { parseIntegral, sampleRegion, estimateSwitchedBounds } from './integral';
+import { parseIntegral, sampleRegion, estimateSwitchedBounds, solveIntegralExactly } from './integral';
 import { buildCoordinateSliceGeometries, type CoordinateSliceGeometry } from './sliceGeometry';
+import { PRESETS } from './presets';
 import type { IntegralInput } from '../types';
 
 const cube: IntegralInput = {
@@ -147,6 +148,71 @@ describe('sampleRegion', () => {
   it('includes the spherical Jacobian', () => {
     const sample = sampleRegion(parseIntegral(unitSphere), 12000);
     expect(sample.estimatedVolume).toBeCloseTo((4 * Math.PI) / 3, 1);
+  });
+});
+
+describe('solveIntegralExactly', () => {
+  it('solves the starter tetrahedron volume as a fraction', () => {
+    const exact = solveIntegralExactly(parseIntegral(tetrahedron));
+    expect(exact?.fraction).toBe('1/6');
+    expect(exact?.decimal).toBeCloseTo(1 / 6);
+  });
+
+  it('integrates polynomial Cartesian inputs with fractional output', () => {
+    const exact = solveIntegralExactly(
+      parseIntegral({
+        ...tetrahedron,
+        integrand: 'x + y + z',
+      }),
+    );
+
+    expect(exact?.fraction).toBe('1/8');
+  });
+
+  it('solves cylindrical volumes with the radial Jacobian', () => {
+    const exact = solveIntegralExactly(parseIntegral(PRESETS[4].input));
+    expect(exact?.fraction).toBe('π');
+    expect(exact?.decimal).toBeCloseTo(Math.PI);
+  });
+
+  it('solves polynomial cylindrical integrals as pi fractions', () => {
+    const exact = solveIntegralExactly(
+      parseIntegral({
+        integrand: 'r^2 + 2z',
+        coordinateSystem: 'cylindrical',
+        variables: ['r', 'θ', 'z'],
+        selectedOrder: 'dz dr dθ',
+        bounds: {
+          r: { lower: '0', upper: '1' },
+          θ: { lower: '0', upper: '2*pi' },
+          z: { lower: '0', upper: '1' },
+        },
+      }),
+    );
+
+    expect(exact?.fraction).toBe('3π/2');
+  });
+
+  it('solves spherical volumes with the sine Jacobian', () => {
+    const exact = solveIntegralExactly(parseIntegral(unitSphere));
+    expect(exact?.fraction).toBe('4π/3');
+    expect(exact?.decimal).toBeCloseTo((4 * Math.PI) / 3);
+  });
+
+  it('solves polynomial spherical integrals as pi fractions', () => {
+    const exact = solveIntegralExactly(
+      parseIntegral({
+        ...unitSphere,
+        integrand: 'ρ^2',
+      }),
+    );
+
+    expect(exact?.fraction).toBe('4π/5');
+  });
+
+  it('returns null for non-polynomial Cartesian inputs that need numeric estimation', () => {
+    const exact = solveIntegralExactly(parseIntegral(PRESETS[2].input));
+    expect(exact).toBeNull();
   });
 });
 

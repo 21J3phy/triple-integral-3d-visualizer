@@ -1,10 +1,10 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { Analytics } from '@vercel/analytics/react';
-import { AlertTriangle, Calculator, Check, Github, GripVertical, Link, Linkedin, Share2 } from 'lucide-react';
+import { AlertTriangle, Bookmark, Calculator, Check, Github, GripVertical, Link, Linkedin, MoveHorizontal, Share2 } from 'lucide-react';
 import { ThreeRegionView } from './components/ThreeRegionView';
 import { rewriteBoundsForOrder, rewriteVariables } from './lib/bounds';
 import { areValidVariables, convertIntegralToCoordinateSystem, COORDINATE_LABELS, DEFAULT_VARIABLES, defaultOuterToInner } from './lib/coordinates';
-import { parseIntegral, sampleRegion } from './lib/integral';
+import { parseIntegral, sampleRegion, solveIntegralExactly } from './lib/integral';
 import { orderFromOuterToInner, orderToOuterInner } from './lib/orders';
 import { PRESETS } from './lib/presets';
 import { PresetPreview } from './components/PresetPreview';
@@ -37,6 +37,7 @@ export function App() {
 
   const parsed = useMemo(() => parseIntegral(input), [input]);
   const sample = useMemo(() => sampleRegion(parsed, SAMPLE_COUNT), [parsed]);
+  const exact = useMemo(() => solveIntegralExactly(parsed), [parsed]);
   const variables = input.variables;
   const outerToInner = orderToOuterInner(input.selectedOrder);
   const innerToOuter = [...outerToInner].reverse();
@@ -166,25 +167,6 @@ export function App() {
             <h1>Triple Integral Visualizer</h1>
           </div>
         </div>
-        <button
-          id="share-equation-button"
-          className={`share-button${shareState === 'copied' ? ' copied' : ''}`}
-          type="button"
-          onClick={handleShare}
-          aria-label="Share this equation"
-        >
-          {shareState === 'copied' ? (
-            <>
-              <Check size={16} aria-hidden="true" />
-              Link Copied!
-            </>
-          ) : (
-            <>
-              <Share2 size={16} aria-hidden="true" />
-              Share
-            </>
-          )}
-        </button>
       </section>
 
       <ErrorBoundary>
@@ -229,30 +211,36 @@ export function App() {
           </div>
 
           <div className="integral-equation">
-            <div className="integral-stack" aria-label="Drag integrals to change order">
-              {outerToInner.map((variable) => (
-                <IntegralBlock
-                  key={variable}
-                  variable={variable}
-                  registerElement={(element) => registerIntegralBlock(variable, element)}
-                  lower={input.bounds[variable].lower}
-                  upper={input.bounds[variable].upper}
-                  isDragging={draggedVariable === variable}
-                  isDropTarget={dropVariable === variable && draggedVariable !== variable}
-                  onLowerChange={(value) => updateBound(variable, 'lower', value)}
-                  onUpperChange={(value) => updateBound(variable, 'upper', value)}
-                  onPointerDown={(event) => {
-                    setDraggedVariable(variable);
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={() => {
-                    setDraggedVariable(null);
-                    setDropVariable(null);
-                  }}
-                />
-              ))}
+            <div className="integral-order-control">
+              <div className="integral-stack" aria-label="Drag integrals to change order">
+                {outerToInner.map((variable) => (
+                  <IntegralBlock
+                    key={variable}
+                    variable={variable}
+                    registerElement={(element) => registerIntegralBlock(variable, element)}
+                    lower={input.bounds[variable].lower}
+                    upper={input.bounds[variable].upper}
+                    isDragging={draggedVariable === variable}
+                    isDropTarget={dropVariable === variable && draggedVariable !== variable}
+                    onLowerChange={(value) => updateBound(variable, 'lower', value)}
+                    onUpperChange={(value) => updateBound(variable, 'upper', value)}
+                    onPointerDown={(event) => {
+                      setDraggedVariable(variable);
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={() => {
+                      setDraggedVariable(null);
+                      setDropVariable(null);
+                    }}
+                  />
+                ))}
+              </div>
+              <p className="integral-hint">
+                <MoveHorizontal size={15} aria-hidden="true" />
+                Drag integrals left or right to change the order of integration.
+              </p>
             </div>
 
             <input
@@ -325,6 +313,32 @@ export function App() {
         </section>
 
         <section className="visual-column">
+          <div className={`visual-share-panel${shareState === 'copied' ? ' copied' : ''}`}>
+            <div className="visual-share-copy" id="share-link-note">
+              <Bookmark size={15} aria-hidden="true" />
+              <span>{shareState === 'copied' ? 'Link copied. Bookmark it or send it to anyone.' : 'Share this setup, or bookmark the link to save it for later.'}</span>
+            </div>
+            <button
+              id="share-equation-button"
+              className={`share-button${shareState === 'copied' ? ' copied' : ''}`}
+              type="button"
+              onClick={handleShare}
+              aria-label="Copy shareable equation link"
+              aria-describedby="share-link-note"
+            >
+              {shareState === 'copied' ? (
+                <>
+                  <Check size={16} aria-hidden="true" />
+                  Link Copied
+                </>
+              ) : (
+                <>
+                  <Share2 size={16} aria-hidden="true" />
+                  Copy Link
+                </>
+              )}
+            </button>
+          </div>
           <ThreeRegionView
             sample={sample}
             parsed={parsed}
@@ -338,13 +352,14 @@ export function App() {
         </section>
 
         <aside className="right-rail">
-          <section className="answer-panel" aria-label="Estimated answer">
+          <section className="answer-panel" aria-label={exact ? 'Exact answer' : 'Estimated answer'}>
             <div className="answer-heading">
               <Calculator size={18} />
-              <h2>Estimate</h2>
+              <h2>{exact ? 'Exact Answer' : 'Estimate'}</h2>
             </div>
-            <div className="answer-value">{sample.integralEstimate.toFixed(5)}</div>
+            <div className="answer-value">{exact ? exact.fraction : sample.integralEstimate.toFixed(5)}</div>
             <div className="answer-details">
+              {exact ? <span>Decimal {exact.decimal.toFixed(5)}</span> : null}
               <span>Volume {sample.estimatedVolume.toFixed(5)}</span>
               <span>Jacobian {sample.jacobianLabel}</span>
               <span>{COORDINATE_LABELS[input.coordinateSystem]}</span>
@@ -375,8 +390,8 @@ export function App() {
       </ErrorBoundary>
 
       <footer className="made-by-credit">
+        <span className="credit-text">Made by Nirav with GPT-5.5 for Ms. Augsburger&apos;s 3rd Block Multi, 25-26.</span>
         <div className="credit-links">
-          <span>Made by Nirav with GPT-5.5 for Ms. Augsburger&apos;s 3rd Block Multi, 25-26.</span>
           <a href="https://github.com/21J3phy/triple-integral-3d-visualizer" target="_blank" rel="noreferrer">
             <Github size={16} aria-hidden="true" />
             GitHub

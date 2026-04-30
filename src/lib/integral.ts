@@ -18,6 +18,13 @@ const math = create(all, {}) as MathJsInstance;
 const ALLOWED_NON_VARIABLE_SYMBOLS = new Set(['e', 'E', 'i', 'Infinity', 'NaN', 'pi', 'PI', 'tau']);
 
 type Scope = Partial<Record<Variable, number>>;
+type Exponents = [number, number, number];
+type Polynomial = Map<string, ExactScalar>;
+
+export interface ExactIntegralResult {
+  fraction: string;
+  decimal: number;
+}
 
 export function parseIntegral(input: IntegralInput): ParsedIntegral {
   const validationErrors: string[] = [];
@@ -117,6 +124,51 @@ export function sampleRegion(parsed: ParsedIntegral, sampleBudget = 7000): Regio
     insideCount: nested.points.length,
     quality,
     warnings,
+  };
+}
+
+export function solveIntegralExactly(parsed: ParsedIntegral): ExactIntegralResult | null {
+  if (parsed.validationErrors.length) return null;
+
+  const variables = parsed.input.variables;
+  let polynomial = parsePolynomial(parsed.input.integrand, parsed.input, variables);
+  if (!polynomial) return null;
+
+  let sineJacobianVariable: number | null = null;
+  if (parsed.input.coordinateSystem === 'cylindrical') {
+    polynomial = multiplyPolynomials(polynomial, variablePolynomial(variables.indexOf(variables[0])));
+  } else if (parsed.input.coordinateSystem === 'spherical') {
+    const radiusIndex = variables.indexOf(variables[0]);
+    sineJacobianVariable = variables.indexOf(variables[2]);
+    polynomial = multiplyPolynomials(polynomial, powerPolynomial(variablePolynomial(radiusIndex), 2));
+  }
+
+  for (const variable of parsed.orderInnerToOuter) {
+    const variableIndex = variables.indexOf(variable);
+    const bounds = parsed.input.bounds[variable];
+    const lower = parsePolynomial(bounds.lower, parsed.input, variables);
+    const upper = parsePolynomial(bounds.upper, parsed.input, variables);
+    if (!lower || !upper) return null;
+
+    if (variableIndex === sineJacobianVariable) {
+      const sineIntegral = integrateSineJacobian(lower, upper);
+      if (!sineIntegral || polynomialDependsOn(polynomial, variableIndex)) return null;
+      polynomial = multiplyPolynomialByScalar(polynomial, sineIntegral);
+      continue;
+    }
+
+    const antiderivative = integratePolynomial(polynomial, variableIndex);
+    polynomial = subtractPolynomials(
+      evaluatePolynomialAt(antiderivative, variableIndex, upper),
+      evaluatePolynomialAt(antiderivative, variableIndex, lower),
+    );
+  }
+
+  const value = constantTerm(polynomial);
+  if (!value) return null;
+  return {
+    fraction: value.toString(),
+    decimal: value.toNumber(),
   };
 }
 
@@ -285,6 +337,440 @@ function evaluate(compiled: { evaluate: (scope?: object) => unknown }, scope: Sc
   } catch {
     return NaN;
   }
+}
+
+class Fraction {
+  private constructor(
+    readonly numerator: bigint,
+    readonly denominator: bigint,
+  ) {}
+
+  static zero() {
+    return new Fraction(0n, 1n);
+  }
+
+  static one() {
+    return new Fraction(1n, 1n);
+  }
+
+  static fromInteger(value: number) {
+    return new Fraction(BigInt(value), 1n);
+  }
+
+  static fromString(value: string): Fraction | null {
+    const trimmed = value.trim();
+    if (/^[+-]?\d+$/.test(trimmed)) return Fraction.normalize(BigInt(trimmed), 1n);
+
+    const decimal = trimmed.match(/^([+-])?(?:(\d+)\.(\d*)|\.(\d+))$/);
+    if (!decimal) return null;
+
+    const sign = decimal[1] === '-' ? -1n : 1n;
+    const whole = decimal[2] ?? '0';
+    const fractional = decimal[3] ?? decimal[4] ?? '';
+    const denominator = 10n ** BigInt(fractional.length);
+    const numerator = sign * BigInt(`${whole}${fractional || '0'}`);
+    return Fraction.normalize(numerator, denominator);
+  }
+
+  add(other: Fraction) {
+    return Fraction.normalize(this.numerator * other.denominator + other.numerator * this.denominator, this.denominator * other.denominator);
+  }
+
+  subtract(other: Fraction) {
+    return this.add(other.negate());
+  }
+
+  multiply(other: Fraction) {
+    return Fraction.normalize(this.numerator * other.numerator, this.denominator * other.denominator);
+  }
+
+  divide(other: Fraction) {
+    if (other.isZero()) return null;
+    return Fraction.normalize(this.numerator * other.denominator, this.denominator * other.numerator);
+  }
+
+  negate() {
+    return new Fraction(-this.numerator, this.denominator);
+  }
+
+  isZero() {
+    return this.numerator === 0n;
+  }
+
+  toNumber() {
+    return Number(this.numerator) / Number(this.denominator);
+  }
+
+  toString() {
+    if (this.denominator === 1n) return this.numerator.toString();
+    return `${this.numerator}/${this.denominator}`;
+  }
+
+  private static normalize(numerator: bigint, denominator: bigint) {
+    if (denominator < 0n) {
+      numerator = -numerator;
+      denominator = -denominator;
+    }
+    if (numerator === 0n) return new Fraction(0n, 1n);
+    const divisor = gcd(absBigInt(numerator), denominator);
+    return new Fraction(numerator / divisor, denominator / divisor);
+  }
+}
+
+class ExactScalar {
+  private constructor(private readonly terms: Map<number, Fraction>) {}
+
+  static zero() {
+    return new ExactScalar(new Map());
+  }
+
+  static one() {
+    return ExactScalar.fromFraction(Fraction.one());
+  }
+
+  static pi() {
+    return ExactScalar.fromTerm(1, Fraction.one());
+  }
+
+  static fromInteger(value: number) {
+    return ExactScalar.fromFraction(Fraction.fromInteger(value));
+  }
+
+  static fromFraction(coefficient: Fraction) {
+    return ExactScalar.fromTerm(0, coefficient);
+  }
+
+  static fromString(value: string): ExactScalar | null {
+    const fraction = Fraction.fromString(value);
+    return fraction ? ExactScalar.fromFraction(fraction) : null;
+  }
+
+  add(other: ExactScalar) {
+    const terms = new Map(this.terms);
+    for (const [power, coefficient] of other.terms) {
+      setScalarTerm(terms, power, (terms.get(power) ?? Fraction.zero()).add(coefficient));
+    }
+    return new ExactScalar(terms);
+  }
+
+  subtract(other: ExactScalar) {
+    return this.add(other.negate());
+  }
+
+  multiply(other: ExactScalar) {
+    const terms = new Map<number, Fraction>();
+    for (const [leftPower, leftCoefficient] of this.terms) {
+      for (const [rightPower, rightCoefficient] of other.terms) {
+        const power = leftPower + rightPower;
+        setScalarTerm(terms, power, (terms.get(power) ?? Fraction.zero()).add(leftCoefficient.multiply(rightCoefficient)));
+      }
+    }
+    return new ExactScalar(terms);
+  }
+
+  divide(other: ExactScalar) {
+    const divisor = other.singleTerm();
+    if (!divisor || divisor.coefficient.isZero()) return null;
+
+    const terms = new Map<number, Fraction>();
+    for (const [power, coefficient] of this.terms) {
+      const nextCoefficient = coefficient.divide(divisor.coefficient);
+      if (!nextCoefficient) return null;
+      setScalarTerm(terms, power - divisor.power, nextCoefficient);
+    }
+    return new ExactScalar(terms);
+  }
+
+  negate() {
+    return new ExactScalar(new Map([...this.terms].map(([power, coefficient]) => [power, coefficient.negate()])));
+  }
+
+  isZero() {
+    return this.terms.size === 0;
+  }
+
+  integerValue(): number | null {
+    const term = this.singleTerm();
+    if (!term || term.power !== 0 || term.coefficient.denominator !== 1n) return null;
+    return Number(term.coefficient.numerator);
+  }
+
+  rationalPiMultiple(): Fraction | null {
+    if (this.isZero()) return Fraction.zero();
+    const term = this.singleTerm();
+    return term?.power === 1 ? term.coefficient : null;
+  }
+
+  toNumber() {
+    return [...this.terms].reduce((sum, [power, coefficient]) => sum + coefficient.toNumber() * Math.PI ** power, 0);
+  }
+
+  toString() {
+    if (this.isZero()) return '0';
+
+    const pieces = [...this.terms]
+      .sort(([leftPower], [rightPower]) => rightPower - leftPower)
+      .map(([power, coefficient]) => formatScalarTerm(power, coefficient));
+
+    return pieces.reduce((text, piece, index) => {
+      if (index === 0) return piece;
+      return piece.startsWith('-') ? `${text} - ${piece.slice(1)}` : `${text} + ${piece}`;
+    }, '');
+  }
+
+  private singleTerm(): { power: number; coefficient: Fraction } | null {
+    if (this.terms.size !== 1) return null;
+    const [power, coefficient] = [...this.terms][0];
+    return { power, coefficient };
+  }
+
+  private static fromTerm(power: number, coefficient: Fraction) {
+    const terms = new Map<number, Fraction>();
+    setScalarTerm(terms, power, coefficient);
+    return new ExactScalar(terms);
+  }
+}
+
+function parsePolynomial(expression: string, input: IntegralInput, variables: [Variable, Variable, Variable]): Polynomial | null {
+  try {
+    return nodeToPolynomial(math.parse(normalizeExpression(expression, input)) as MathNode, variables);
+  } catch {
+    return null;
+  }
+}
+
+function nodeToPolynomial(node: MathNode, variables: [Variable, Variable, Variable]): Polynomial | null {
+  const typedNode = node as MathNode & {
+    args?: MathNode[];
+    content?: MathNode;
+    fn?: string;
+    isConstantNode?: boolean;
+    isOperatorNode?: boolean;
+    isParenthesisNode?: boolean;
+    isSymbolNode?: boolean;
+    name?: string;
+    op?: string;
+    value?: string | number;
+  };
+
+  if (typedNode.isParenthesisNode && typedNode.content) return nodeToPolynomial(typedNode.content, variables);
+
+  if (typedNode.isConstantNode && typedNode.value != null) {
+    const coefficient = ExactScalar.fromString(String(typedNode.value));
+    return coefficient ? constantPolynomial(coefficient) : null;
+  }
+
+  if (typedNode.isSymbolNode && typedNode.name) {
+    const variableIndex = variables.indexOf(typedNode.name);
+    if (variableIndex >= 0) return variablePolynomial(variableIndex);
+    if (typedNode.name === 'pi' || typedNode.name === 'PI') return constantPolynomial(ExactScalar.pi());
+    if (typedNode.name === 'tau') return constantPolynomial(ExactScalar.fromInteger(2).multiply(ExactScalar.pi()));
+    return null;
+  }
+
+  if (!typedNode.isOperatorNode || !typedNode.args) return null;
+
+  if (typedNode.fn === 'unaryMinus') {
+    const value = nodeToPolynomial(typedNode.args[0], variables);
+    return value ? negatePolynomial(value) : null;
+  }
+
+  const [leftNode, rightNode] = typedNode.args;
+  const left = nodeToPolynomial(leftNode, variables);
+  const right = rightNode ? nodeToPolynomial(rightNode, variables) : null;
+
+  if (typedNode.op === '+' && left && right) return addPolynomials(left, right);
+  if (typedNode.op === '-' && left && right) return subtractPolynomials(left, right);
+  if (typedNode.op === '*' && left && right) return multiplyPolynomials(left, right);
+  if (typedNode.op === '/' && left && right) {
+    const scalar = constantTerm(right);
+    return scalar ? dividePolynomial(left, scalar) : null;
+  }
+  if (typedNode.op === '^' && left && right) {
+    const exponent = constantTerm(right);
+    const power = exponent?.integerValue();
+    return power != null && Number.isInteger(power) && power >= 0 ? powerPolynomial(left, power) : null;
+  }
+
+  return null;
+}
+
+function constantPolynomial(coefficient: ExactScalar): Polynomial {
+  return coefficient.isZero() ? new Map() : new Map([[keyFor([0, 0, 0]), coefficient]]);
+}
+
+function variablePolynomial(variableIndex: number): Polynomial {
+  const exponents: Exponents = [0, 0, 0];
+  exponents[variableIndex] = 1;
+  return new Map([[keyFor(exponents), ExactScalar.one()]]);
+}
+
+function addPolynomials(left: Polynomial, right: Polynomial): Polynomial {
+  const result = new Map(left);
+  for (const [key, coefficient] of right) {
+    setTerm(result, key, (result.get(key) ?? ExactScalar.zero()).add(coefficient));
+  }
+  return result;
+}
+
+function subtractPolynomials(left: Polynomial, right: Polynomial): Polynomial {
+  return addPolynomials(left, negatePolynomial(right));
+}
+
+function negatePolynomial(polynomial: Polynomial): Polynomial {
+  return mapPolynomial(polynomial, (coefficient) => coefficient.negate());
+}
+
+function multiplyPolynomials(left: Polynomial, right: Polynomial): Polynomial {
+  const result: Polynomial = new Map();
+  for (const [leftKey, leftCoefficient] of left) {
+    const leftExponents = exponentsFor(leftKey);
+    for (const [rightKey, rightCoefficient] of right) {
+      const rightExponents = exponentsFor(rightKey);
+      const exponents: Exponents = [
+        leftExponents[0] + rightExponents[0],
+        leftExponents[1] + rightExponents[1],
+        leftExponents[2] + rightExponents[2],
+      ];
+      const key = keyFor(exponents);
+      setTerm(result, key, (result.get(key) ?? ExactScalar.zero()).add(leftCoefficient.multiply(rightCoefficient)));
+    }
+  }
+  return result;
+}
+
+function dividePolynomial(polynomial: Polynomial, scalar: ExactScalar): Polynomial | null {
+  if (scalar.isZero()) return null;
+  const result: Polynomial = new Map();
+  for (const [key, coefficient] of polynomial) {
+    const divided = coefficient.divide(scalar);
+    if (!divided) return null;
+    setTerm(result, key, divided);
+  }
+  return result;
+}
+
+function powerPolynomial(polynomial: Polynomial, power: number): Polynomial {
+  let result = constantPolynomial(ExactScalar.one());
+  for (let index = 0; index < power; index += 1) {
+    result = multiplyPolynomials(result, polynomial);
+  }
+  return result;
+}
+
+function integratePolynomial(polynomial: Polynomial, variableIndex: number): Polynomial {
+  const result: Polynomial = new Map();
+  for (const [key, coefficient] of polynomial) {
+    const exponents = exponentsFor(key);
+    const nextExponent = exponents[variableIndex] + 1;
+    exponents[variableIndex] = nextExponent;
+    const nextCoefficient = coefficient.divide(ExactScalar.fromInteger(nextExponent));
+    if (nextCoefficient) setTerm(result, keyFor(exponents), nextCoefficient);
+  }
+  return result;
+}
+
+function evaluatePolynomialAt(polynomial: Polynomial, variableIndex: number, replacement: Polynomial): Polynomial {
+  let result: Polynomial = new Map();
+  for (const [key, coefficient] of polynomial) {
+    const exponents = exponentsFor(key);
+    const replacementPower = powerPolynomial(replacement, exponents[variableIndex]);
+    exponents[variableIndex] = 0;
+    const residual = new Map([[keyFor(exponents), coefficient]]);
+    result = addPolynomials(result, multiplyPolynomials(residual, replacementPower));
+  }
+  return result;
+}
+
+function integrateSineJacobian(lower: Polynomial, upper: Polynomial): ExactScalar | null {
+  const lowerValue = constantTerm(lower);
+  const upperValue = constantTerm(upper);
+  if (!lowerValue || !upperValue) return null;
+
+  const lowerCosine = cosineOfPiMultiple(lowerValue);
+  const upperCosine = cosineOfPiMultiple(upperValue);
+  return lowerCosine && upperCosine ? lowerCosine.subtract(upperCosine) : null;
+}
+
+function cosineOfPiMultiple(value: ExactScalar): ExactScalar | null {
+  const multiple = value.rationalPiMultiple();
+  if (!multiple) return null;
+
+  const normalized = positiveModulo(multiple.numerator, multiple.denominator * 2n);
+  const denominator = multiple.denominator;
+  if (normalized === 0n) return ExactScalar.one();
+  if (normalized === denominator) return ExactScalar.fromInteger(-1);
+  if (normalized * 2n === denominator || normalized * 2n === denominator * 3n) return ExactScalar.zero();
+  return null;
+}
+
+function polynomialDependsOn(polynomial: Polynomial, variableIndex: number): boolean {
+  return [...polynomial.keys()].some((key) => exponentsFor(key)[variableIndex] > 0);
+}
+
+function multiplyPolynomialByScalar(polynomial: Polynomial, scalar: ExactScalar): Polynomial {
+  return mapPolynomial(polynomial, (coefficient) => coefficient.multiply(scalar));
+}
+
+function constantTerm(polynomial: Polynomial): ExactScalar | null {
+  if (polynomial.size === 0) return ExactScalar.zero();
+  if (polynomial.size === 1) return polynomial.get(keyFor([0, 0, 0])) ?? null;
+  return null;
+}
+
+function mapPolynomial(polynomial: Polynomial, map: (coefficient: ExactScalar) => ExactScalar): Polynomial {
+  const result: Polynomial = new Map();
+  for (const [key, coefficient] of polynomial) {
+    setTerm(result, key, map(coefficient));
+  }
+  return result;
+}
+
+function setTerm(polynomial: Polynomial, key: string, coefficient: ExactScalar) {
+  if (coefficient.isZero()) polynomial.delete(key);
+  else polynomial.set(key, coefficient);
+}
+
+function setScalarTerm(terms: Map<number, Fraction>, power: number, coefficient: Fraction) {
+  if (coefficient.isZero()) terms.delete(power);
+  else terms.set(power, coefficient);
+}
+
+function formatScalarTerm(power: number, coefficient: Fraction): string {
+  if (power === 0) return coefficient.toString();
+
+  const isNegative = coefficient.numerator < 0n;
+  const numerator = absBigInt(coefficient.numerator);
+  const piPart = power === 1 ? 'π' : `π^${power}`;
+  const signedPrefix = isNegative ? '-' : '';
+  const numeratorText = numerator === 1n ? piPart : `${numerator}${piPart}`;
+  if (coefficient.denominator === 1n) return `${signedPrefix}${numeratorText}`;
+  return `${signedPrefix}${numeratorText}/${coefficient.denominator}`;
+}
+
+function keyFor(exponents: Exponents): string {
+  return exponents.join(',');
+}
+
+function exponentsFor(key: string): Exponents {
+  return key.split(',').map(Number) as Exponents;
+}
+
+function gcd(left: bigint, right: bigint): bigint {
+  while (right !== 0n) {
+    const next = left % right;
+    left = right;
+    right = next;
+  }
+  return left;
+}
+
+function absBigInt(value: bigint): bigint {
+  return value < 0n ? -value : value;
+}
+
+function positiveModulo(value: bigint, modulus: bigint): bigint {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function normalizeExpression(expression: string, input: IntegralInput): string {
