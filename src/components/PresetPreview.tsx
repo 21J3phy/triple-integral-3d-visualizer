@@ -11,6 +11,7 @@ interface PresetPreviewProps {
 
 const PREVIEW_SIZE = 120;
 const PREVIEW_RESOLUTION = 24;
+const Z_UP = new THREE.Vector3(0, 0, 1);
 
 export function PresetPreview({ input }: PresetPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -29,6 +30,7 @@ export function PresetPreview({ input }: PresetPreviewProps) {
     scene.background = null;
 
     const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+    camera.up.copy(Z_UP);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(PREVIEW_SIZE, PREVIEW_SIZE);

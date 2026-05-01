@@ -24,6 +24,8 @@ const AXIS_COLORS: Record<Axis, number> = {
   z: 0x286fc7,
 };
 
+const Z_UP = new THREE.Vector3(0, 0, 1);
+
 export function ThreeRegionView({
   sample,
   parsed,
@@ -67,7 +69,9 @@ export function ThreeRegionView({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf7f9fb);
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+    camera.up.copy(Z_UP);
     camera.position.set(4.5, 4.2, 3.8);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -82,7 +86,9 @@ export function ThreeRegionView({
     const directional = new THREE.DirectionalLight(0xffffff, 1.4);
     directional.position.set(3, 4, 5);
     scene.add(directional);
-    scene.add(new THREE.GridHelper(6, 12, 0xd6dee8, 0xe7edf3));
+    const grid = new THREE.GridHelper(6, 12, 0xd6dee8, 0xe7edf3);
+    grid.rotation.x = Math.PI / 2;
+    scene.add(grid);
 
     addAxes(scene);
 
